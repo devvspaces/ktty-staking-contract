@@ -12,7 +12,10 @@ contract KTTYStakingScript is Script {
     function run() public {
         vm.startBroadcast();
 
-        stakingContract = new KTTYStaking(address(0));
+        // Load values from .env file
+        address ktty = vm.envAddress("KTTY_ADDRESS");
+
+        stakingContract = new KTTYStaking(ktty);
 
         vm.stopBroadcast();
     }

@@ -14,8 +14,11 @@ contract RoninNFTScript is Script {
         vm.startBroadcast();
 
         // Deploy mock tokens
-        new MockERC20("RON Token", "RON");
         new MockERC20("Kitty Token", "KTTY");
+        new MockERC20("Zee Token", "ZEE");
+        new MockERC20("Kev AI Token", "KEV-AI");
+        new MockERC20("Real Token", "REAL");
+        new MockERC20("Paw Token", "PAW");
 
         vm.stopBroadcast();
     }
