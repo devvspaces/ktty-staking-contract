@@ -1,9 +1,8 @@
 const { createClient } = require("@supabase/supabase-js");
 const { ethers } = require("ethers");
 const dotenv = require("dotenv");
-const fs = require('fs').promises;
-const path = require('path');
-
+const fs = require("fs").promises;
+const path = require("path");
 
 dotenv.config({
   path: "../.env",
@@ -30,17 +29,24 @@ const tierUpdatedFilter = stakingContract.filters.TierUpdated();
 const stakedFilter = stakingContract.filters.Staked();
 const stakeWithdrawnFilter = stakingContract.filters.StakeWithdrawn();
 const rewardClaimedFilter = stakingContract.filters.RewardClaimed();
+const rewardTokenRegisteredFilter =
+  stakingContract.filters.RewardTokenRegistered();
+const rewardTokenUpdatedFilter = stakingContract.filters.RewardTokenUpdated();
+const tierRewardTokenAddedFilter =
+  stakingContract.filters.TierRewardTokenAdded();
+const tierRewardTokenRemovedFilter =
+  stakingContract.filters.TierRewardTokenRemoved();
 
 // Track the last processed block to resume indexing
 let lastProcessedBlock;
 
 // Path to store the last processed block
-const BLOCK_FILE_PATH = path.join(__dirname, 'last-block.json');
+const BLOCK_FILE_PATH = path.join(__dirname, "last-block.json");
 
 // Function to read the last processed block from file
 async function loadLastProcessedBlock() {
   try {
-    const data = await fs.readFile(BLOCK_FILE_PATH, 'utf8');
+    const data = await fs.readFile(BLOCK_FILE_PATH, "utf8");
     const parsed = JSON.parse(data);
     return parsed.lastProcessedBlock || process.env.STARTING_BLOCK || 0;
   } catch (error) {
@@ -55,17 +61,17 @@ async function saveLastProcessedBlock(blockNumber) {
     // First write to a temporary file
     const tempPath = `${BLOCK_FILE_PATH}.tmp`;
     await fs.writeFile(
-      tempPath, 
+      tempPath,
       JSON.stringify({ lastProcessedBlock: blockNumber }, null, 2)
     );
-    
+
     // Then rename (atomic operation on most file systems)
     await fs.rename(tempPath, BLOCK_FILE_PATH);
-    
+
     lastProcessedBlock = blockNumber;
     console.log(`Last processed block updated to: ${lastProcessedBlock}`);
   } catch (error) {
-    console.error('Error saving last processed block:', error);
+    console.error("Error saving last processed block:", error);
   }
 }
 
@@ -74,6 +80,21 @@ async function handleTierCreated(event) {
 
   // Query contract for maxStake (not in event)
   const tier = await stakingContract.tiers(tierId);
+
+  // Check if already in supabase
+  const { data: existingTier, error: existingTierError } = await supabase
+    .from("tiers")
+    .select("*")
+    .eq("id", tierId.toString())
+    .single();
+  if (existingTierError && existingTierError.code !== "PGRST116") {
+    console.error("Error checking existing tier:", existingTierError);
+    return;
+  }
+  if (existingTier) {
+    console.log(`Tier ${tierId} already exists, skipping creation.`);
+    return;
+  }
 
   await supabase.from("tiers").insert({
     id: tierId.toString(),
@@ -88,7 +109,7 @@ async function handleTierCreated(event) {
 
 async function handleTierUpdated(event) {
   const { tierId, name, minStake, lockupPeriod, apy, isActive } = event.args;
-  
+
   await supabase
     .from("tiers")
     .update({
@@ -101,8 +122,103 @@ async function handleTierUpdated(event) {
     .eq("id", tierId.toString());
 }
 
+async function handleRewardTokenRegistered(event) {
+  const { tokenAddress, symbol, rewardRate } = event.args;
+
+  // Check if already in supabase
+  const { data: existingToken, error: existingTokenError } = await supabase
+    .from("reward_tokens")
+    .select("*")
+    .eq("address", tokenAddress)
+    .single();
+
+  if (existingTokenError && existingTokenError.code !== "PGRST116") {
+    console.error("Error checking existing token:", existingTokenError);
+    return;
+  }
+
+  if (existingToken) {
+    console.log(
+      `Reward token ${tokenAddress} already exists, skipping creation.`
+    );
+    return;
+  }
+
+  await supabase.from("reward_tokens").insert({
+    address: tokenAddress,
+    symbol: symbol,
+    reward_rate: Number(rewardRate),
+    is_active: true,
+  });
+}
+
+async function handleRewardTokenUpdated(event) {
+  const { tokenAddress, symbol, rewardRate } = event.args;
+
+  await supabase
+    .from("reward_tokens")
+    .update({
+      symbol: symbol,
+      reward_rate: rewardRate,
+    })
+    .eq("address", tokenAddress);
+}
+
+async function handleTierRewardTokenAdded(event) {
+  const { tierId, tokenAddress } = event.args;
+
+  // Check if already in supabase
+  const { data: existingToken, error: existingTokenError } = await supabase
+    .from("tier_reward_tokens")
+    .select("*")
+    .eq("tier_id", tierId.toString())
+    .eq("token_address", tokenAddress)
+    .single();
+
+  if (existingTokenError && existingTokenError.code !== "PGRST116") {
+    console.error("Error checking existing token:", existingTokenError);
+    return;
+  }
+  if (existingToken) {
+    console.log(
+      `Tier reward token ${tokenAddress} already exists for tier ${tierId}, skipping addition.`
+    );
+    return;
+  }
+
+  await supabase.from("tier_reward_tokens").insert({
+    tier_id: tierId.toString(),
+    token_address: tokenAddress,
+  });
+}
+
+async function handleTierRewardTokenRemoved(event) {
+  const { tierId, tokenAddress } = event.args;
+
+  await supabase
+    .from("tier_reward_tokens")
+    .delete()
+    .eq("tier_id", tierId.toString())
+    .eq("token_address", tokenAddress);
+}
+
 async function handleStaked(event) {
   const { stakeId, owner, amount, tierId, startTime, endTime } = event.args;
+
+  // Check if already in supabase
+  const { data: existingStake, error: existingStakeError } = await supabase
+    .from("stakes")
+    .select("*")
+    .eq("id", stakeId.toString())
+    .single();
+  if (existingStakeError && existingStakeError.code !== "PGRST116") {
+    console.error("Error checking existing stake:", existingStakeError);
+    return;
+  }
+  if (existingStake) {
+    console.log(`Stake ${stakeId} already exists, skipping creation.`);
+    return;
+  }
 
   await supabase.from("stakes").insert({
     id: stakeId.toString(),
@@ -128,6 +244,25 @@ async function handleStakeWithdrawn(event) {
 async function handleRewardClaimed(event) {
   const { stakeId, owner, token, amount } = event.args;
 
+  // Check if already in supabase
+  const { data: existingClaim, error: existingClaimError } = await supabase
+    .from("reward_claims")
+    .select("*")
+    .eq("stake_id", stakeId.toString())
+    .eq("owner", owner)
+    .eq("token_address", token)
+    .single();
+  if (existingClaimError && existingClaimError.code !== "PGRST116") {
+    console.error("Error checking existing claim:", existingClaimError);
+    return;
+  }
+  if (existingClaim) {
+    console.log(
+      `Reward claim for stake ${stakeId} already exists, skipping creation.`
+    );
+    return;
+  }
+
   await supabase.from("reward_claims").insert({
     stake_id: stakeId.toString(),
     owner,
@@ -143,6 +278,63 @@ async function handleRewardClaimed(event) {
     .eq("id", stakeId.toString());
 }
 
+const EventHandlers = {
+  TierCreated: {
+    handler: handleTierCreated,
+    filter: tierCreatedFilter,
+  },
+  TierUpdated: {
+    handler: handleTierUpdated,
+    filter: tierUpdatedFilter,
+  },
+  Staked: {
+    handler: handleStaked,
+    filter: stakedFilter,
+  },
+  StakeWithdrawn: {
+    handler: handleStakeWithdrawn,
+    filter: stakeWithdrawnFilter,
+  },
+  RewardClaimed: {
+    handler: handleRewardClaimed,
+    filter: rewardClaimedFilter,
+  },
+  RewardTokenRegistered: {
+    handler: handleRewardTokenRegistered,
+    filter: rewardTokenRegisteredFilter,
+  },
+  RewardTokenUpdated: {
+    handler: handleRewardTokenUpdated,
+    filter: rewardTokenUpdatedFilter,
+  },
+  TierRewardTokenAdded: {
+    handler: handleTierRewardTokenAdded,
+    filter: tierRewardTokenAddedFilter,
+  },
+  TierRewardTokenRemoved: {
+    handler: handleTierRewardTokenRemoved,
+    filter: tierRewardTokenRemovedFilter,
+  },
+};
+
+async function processHandlers(fromBlock, toBlock) {
+  for (const [eventName, { handler, filter }] of Object.entries(
+    EventHandlers
+  )) {
+    console.log(`Processing ${eventName} events`);
+    const events = await stakingContract.queryFilter(
+      filter,
+      fromBlock,
+      toBlock
+    );
+    for (const event of events) {
+      await handler(event);
+    }
+  }
+
+  await saveLastProcessedBlock(toBlock);
+}
+
 async function pollForEvents() {
   try {
     const currentBlock = await provider.getBlockNumber();
@@ -156,58 +348,7 @@ async function pollForEvents() {
       const fromBlock = lastProcessedBlock + 1;
       const toBlock = currentBlock;
 
-      // Process TierCreated events
-      const tierCreatedEvents = await stakingContract.queryFilter(
-        tierCreatedFilter,
-        fromBlock,
-        toBlock
-      );
-      for (const event of tierCreatedEvents) {
-        await handleTierCreated(event);
-      }
-
-      // Process TierUpdated events
-      const tierUpdatedEvents = await stakingContract.queryFilter(
-        tierUpdatedFilter,
-        fromBlock,
-        toBlock
-      );
-      for (const event of tierUpdatedEvents) {
-        await handleTierUpdated(event);
-      }
-
-      // Process Staked events
-      const stakedEvents = await stakingContract.queryFilter(
-        stakedFilter,
-        fromBlock,
-        toBlock
-      );
-      for (const event of stakedEvents) {
-        await handleStaked(event);
-      }
-
-      // Process StakeWithdrawn events
-      const stakeWithdrawnEvents = await stakingContract.queryFilter(
-        stakeWithdrawnFilter,
-        fromBlock,
-        toBlock
-      );
-      for (const event of stakeWithdrawnEvents) {
-        await handleStakeWithdrawn(event);
-      }
-
-      // Process RewardClaimed events
-      const rewardClaimedEvents = await stakingContract.queryFilter(
-        rewardClaimedFilter,
-        fromBlock,
-        toBlock
-      );
-      for (const event of rewardClaimedEvents) {
-        await handleRewardClaimed(event);
-      }
-
-      // Update the last processed block
-      await saveLastProcessedBlock(currentBlock);
+      await processHandlers(fromBlock, toBlock);
     }
   } catch (error) {
     console.error("Error polling for events:", error);
@@ -236,66 +377,16 @@ async function startIndexing() {
 
     console.log(`Processing blocks ${fromBlock} to ${toBlock}`);
 
-    // Process TierCreated events
-    const tierCreatedEvents = await stakingContract.queryFilter(
-      tierCreatedFilter,
-      fromBlock,
-      toBlock
-    );
-    for (const event of tierCreatedEvents) {
-      await handleTierCreated(event);
-    }
-
-    // Process TierUpdated events
-    const tierUpdatedEvents = await stakingContract.queryFilter(
-      tierUpdatedFilter,
-      fromBlock,
-      toBlock
-    );
-    for (const event of tierUpdatedEvents) {
-      await handleTierUpdated(event);
-    }
-
-
-    // Process Staked events
-    const stakedEvents = await stakingContract.queryFilter(
-      stakedFilter,
-      fromBlock,
-      toBlock
-    );
-    for (const event of stakedEvents) {
-      await handleStaked(event);
-    }
-
-    // Process StakeWithdrawn events
-    const stakeWithdrawnEvents = await stakingContract.queryFilter(
-      stakeWithdrawnFilter,
-      fromBlock,
-      toBlock
-    );
-    for (const event of stakeWithdrawnEvents) {
-      await handleStakeWithdrawn(event);
-    }
-
-    // Process RewardClaimed events
-    const rewardClaimedEvents = await stakingContract.queryFilter(
-      rewardClaimedFilter,
-      fromBlock,
-      toBlock
-    );
-    for (const event of rewardClaimedEvents) {
-      await handleRewardClaimed(event);
-    }
-
-    await saveLastProcessedBlock(toBlock);
+    await processHandlers(fromBlock, toBlock);
   }
-
-  // Start listening for new events
-  pollForEvents();
 
   console.log(
     `Indexer caught up to block ${currentBlock}, now listening for new events`
   );
+
+  // // Start listening for new events
+  pollForEvents();
+  // stakingContract.on(tierCreatedFilter, handleTierCreated);
 }
 
 // Handle errors and ensure clean shutdown
