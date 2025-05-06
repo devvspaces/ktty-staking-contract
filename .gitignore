@@ -15,3 +15,7 @@ docs/
 
 # Dotenv file
 .env
+
+last-block.json
+
+node_modules/

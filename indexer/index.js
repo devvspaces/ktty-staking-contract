@@ -1,0 +1,313 @@
+const { createClient } = require("@supabase/supabase-js");
+const { ethers } = require("ethers");
+const dotenv = require("dotenv");
+const fs = require('fs').promises;
+const path = require('path');
+
+
+dotenv.config({
+  path: "../.env",
+});
+
+// Supabase setup
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_KEY;
+const supabase = createClient(supabaseUrl, supabaseKey);
+
+// Blockchain setup
+const provider = new ethers.JsonRpcProvider(process.env.RPC_URL);
+const stakingAddress = process.env.STAKING_CONTRACT_ADDRESS;
+const stakingABI = require("../out/KTTYStaking.sol/KTTYStaking.json").abi;
+const stakingContract = new ethers.Contract(
+  stakingAddress,
+  stakingABI,
+  provider
+);
+
+// Set up event filters
+const tierCreatedFilter = stakingContract.filters.TierCreated();
+const tierUpdatedFilter = stakingContract.filters.TierUpdated();
+const stakedFilter = stakingContract.filters.Staked();
+const stakeWithdrawnFilter = stakingContract.filters.StakeWithdrawn();
+const rewardClaimedFilter = stakingContract.filters.RewardClaimed();
+
+// Track the last processed block to resume indexing
+let lastProcessedBlock;
+
+// Path to store the last processed block
+const BLOCK_FILE_PATH = path.join(__dirname, 'last-block.json');
+
+// Function to read the last processed block from file
+async function loadLastProcessedBlock() {
+  try {
+    const data = await fs.readFile(BLOCK_FILE_PATH, 'utf8');
+    const parsed = JSON.parse(data);
+    return parsed.lastProcessedBlock || process.env.STARTING_BLOCK || 0;
+  } catch (error) {
+    // If file doesn't exist or has invalid format, return default
+    return process.env.STARTING_BLOCK || 0;
+  }
+}
+
+// Function to save the last processed block atomically
+async function saveLastProcessedBlock(blockNumber) {
+  try {
+    // First write to a temporary file
+    const tempPath = `${BLOCK_FILE_PATH}.tmp`;
+    await fs.writeFile(
+      tempPath, 
+      JSON.stringify({ lastProcessedBlock: blockNumber }, null, 2)
+    );
+    
+    // Then rename (atomic operation on most file systems)
+    await fs.rename(tempPath, BLOCK_FILE_PATH);
+    
+    lastProcessedBlock = blockNumber;
+    console.log(`Last processed block updated to: ${lastProcessedBlock}`);
+  } catch (error) {
+    console.error('Error saving last processed block:', error);
+  }
+}
+
+async function handleTierCreated(event) {
+  const { tierId, name, minStake, lockupPeriod, apy } = event.args;
+
+  // Query contract for maxStake (not in event)
+  const tier = await stakingContract.tiers(tierId);
+
+  await supabase.from("tiers").insert({
+    id: tierId.toString(),
+    name,
+    min_stake: minStake.toString(),
+    max_stake: tier.maxStake.toString(),
+    lockup_period: lockupPeriod.toString(),
+    apy: apy.toString(),
+    is_active: true,
+  });
+}
+
+async function handleTierUpdated(event) {
+  const { tierId, name, minStake, lockupPeriod, apy, isActive } = event.args;
+  
+  await supabase
+    .from("tiers")
+    .update({
+      name,
+      min_stake: minStake.toString(),
+      lockup_period: lockupPeriod.toString(),
+      apy: apy.toString(),
+      is_active: isActive,
+    })
+    .eq("id", tierId.toString());
+}
+
+async function handleStaked(event) {
+  const { stakeId, owner, amount, tierId, startTime, endTime } = event.args;
+
+  await supabase.from("stakes").insert({
+    id: stakeId.toString(),
+    owner,
+    amount: amount.toString(),
+    tier_id: tierId.toString(),
+    start_time: startTime.toString(),
+    end_time: endTime.toString(),
+    has_withdrawn: false,
+    has_claimed_rewards: false,
+  });
+}
+
+async function handleStakeWithdrawn(event) {
+  const { stakeId } = event.args;
+
+  await supabase
+    .from("stakes")
+    .update({ has_withdrawn: true })
+    .eq("id", stakeId.toString());
+}
+
+async function handleRewardClaimed(event) {
+  const { stakeId, owner, token, amount } = event.args;
+
+  await supabase.from("reward_claims").insert({
+    stake_id: stakeId.toString(),
+    owner,
+    token_address: token,
+    amount: amount.toString(),
+    block_timestamp: event.blockNumber,
+    transaction_hash: event.transactionHash,
+  });
+
+  await supabase
+    .from("stakes")
+    .update({ has_claimed_rewards: true })
+    .eq("id", stakeId.toString());
+}
+
+async function pollForEvents() {
+  try {
+    const currentBlock = await provider.getBlockNumber();
+
+    if (currentBlock > lastProcessedBlock) {
+      console.log(
+        `New blocks found: ${lastProcessedBlock + 1} to ${currentBlock}`
+      );
+
+      // Process events in the new blocks
+      const fromBlock = lastProcessedBlock + 1;
+      const toBlock = currentBlock;
+
+      // Process TierCreated events
+      const tierCreatedEvents = await stakingContract.queryFilter(
+        tierCreatedFilter,
+        fromBlock,
+        toBlock
+      );
+      for (const event of tierCreatedEvents) {
+        await handleTierCreated(event);
+      }
+
+      // Process TierUpdated events
+      const tierUpdatedEvents = await stakingContract.queryFilter(
+        tierUpdatedFilter,
+        fromBlock,
+        toBlock
+      );
+      for (const event of tierUpdatedEvents) {
+        await handleTierUpdated(event);
+      }
+
+      // Process Staked events
+      const stakedEvents = await stakingContract.queryFilter(
+        stakedFilter,
+        fromBlock,
+        toBlock
+      );
+      for (const event of stakedEvents) {
+        await handleStaked(event);
+      }
+
+      // Process StakeWithdrawn events
+      const stakeWithdrawnEvents = await stakingContract.queryFilter(
+        stakeWithdrawnFilter,
+        fromBlock,
+        toBlock
+      );
+      for (const event of stakeWithdrawnEvents) {
+        await handleStakeWithdrawn(event);
+      }
+
+      // Process RewardClaimed events
+      const rewardClaimedEvents = await stakingContract.queryFilter(
+        rewardClaimedFilter,
+        fromBlock,
+        toBlock
+      );
+      for (const event of rewardClaimedEvents) {
+        await handleRewardClaimed(event);
+      }
+
+      // Update the last processed block
+      await saveLastProcessedBlock(currentBlock);
+    }
+  } catch (error) {
+    console.error("Error polling for events:", error);
+  }
+
+  // Poll again after a delay
+  setTimeout(pollForEvents, 15000); // 15 seconds
+}
+
+// Main indexing function
+async function startIndexing() {
+  // Load the last processed block from file
+  lastProcessedBlock = await loadLastProcessedBlock();
+  console.log(`Starting indexer from block ${lastProcessedBlock}`);
+
+  // Process historical events (backfill)
+  const currentBlock = await provider.getBlockNumber();
+  const batchSize = 100; // Adjust based on your RPC provider limits
+
+  for (
+    let fromBlock = Number(lastProcessedBlock);
+    fromBlock <= currentBlock;
+    fromBlock += batchSize
+  ) {
+    const toBlock = Math.min(fromBlock + batchSize - 1, currentBlock);
+
+    console.log(`Processing blocks ${fromBlock} to ${toBlock}`);
+
+    // Process TierCreated events
+    const tierCreatedEvents = await stakingContract.queryFilter(
+      tierCreatedFilter,
+      fromBlock,
+      toBlock
+    );
+    for (const event of tierCreatedEvents) {
+      await handleTierCreated(event);
+    }
+
+    // Process TierUpdated events
+    const tierUpdatedEvents = await stakingContract.queryFilter(
+      tierUpdatedFilter,
+      fromBlock,
+      toBlock
+    );
+    for (const event of tierUpdatedEvents) {
+      await handleTierUpdated(event);
+    }
+
+
+    // Process Staked events
+    const stakedEvents = await stakingContract.queryFilter(
+      stakedFilter,
+      fromBlock,
+      toBlock
+    );
+    for (const event of stakedEvents) {
+      await handleStaked(event);
+    }
+
+    // Process StakeWithdrawn events
+    const stakeWithdrawnEvents = await stakingContract.queryFilter(
+      stakeWithdrawnFilter,
+      fromBlock,
+      toBlock
+    );
+    for (const event of stakeWithdrawnEvents) {
+      await handleStakeWithdrawn(event);
+    }
+
+    // Process RewardClaimed events
+    const rewardClaimedEvents = await stakingContract.queryFilter(
+      rewardClaimedFilter,
+      fromBlock,
+      toBlock
+    );
+    for (const event of rewardClaimedEvents) {
+      await handleRewardClaimed(event);
+    }
+
+    await saveLastProcessedBlock(toBlock);
+  }
+
+  // Start listening for new events
+  pollForEvents();
+
+  console.log(
+    `Indexer caught up to block ${currentBlock}, now listening for new events`
+  );
+}
+
+// Handle errors and ensure clean shutdown
+process.on("SIGINT", async () => {
+  console.log("Shutting down indexer...");
+  // Remove event listeners
+  stakingContract.removeAllListeners();
+  process.exit(0);
+});
+
+// Start the indexer
+startIndexing().catch((error) => {
+  console.error("Error in indexer:", error);
+  process.exit(1);
+});

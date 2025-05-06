@@ -85,20 +85,31 @@ forge verify-contract --verifier sourcify --verifier-url https://sourcify.roninc
 
 forge script script/Token.s.sol --rpc-url $RPC_URL --broadcast --private-key $PRIVATE_KEY
 
+# Add a new tier to the staking contract
 cast send \
-  --rpc-url $RONIN_RPC_URL \
+  --rpc-url $RPC_URL \
   --private-key $PRIVATE_KEY \
-  0x49B6Af6116222777575e65dbB2b7CDaaF50787F3 \
-  "mint(address,uint256)" \
-  0xA0Ca70DFB6Fb79fD5EF160D3EAc677868547ffEF \
-  1000000000000000000000000000  \
+  $STAKING_CONTRACT_ADDRESS \
+  "addTier(string,uint256,uint256,uint256,uint256)" \
+  "Tier 1" \
+  $(cast --to-wei "1")  \
+  $(cast --to-wei "10")  \
+  30 \
+  20000
   --legacy
 
-  cast send \
-  --rpc-url $RONIN_RPC_URL \
+# Update a tier on the staking contract
+cast send \
+  --rpc-url $RPC_URL \
   --private-key $PRIVATE_KEY \
-  0x4E5932906ad152071bA0253840bDE1Ab748D3917 \
-  "startPhase(uint8)" \
+  $STAKING_CONTRACT_ADDRESS \
+  "updateTier(uint256,string,uint256,uint256,uint256,uint256,bool)" \
   1 \
+  "Entry" \
+  $(cast --to-wei "1")  \
+  $(cast --to-wei "10")  \
+  30 \
+  20000 \
+  true
   --legacy
 ```

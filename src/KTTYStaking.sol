@@ -278,7 +278,7 @@ contract KTTYStaking is AccessControl, ReentrancyGuard, Pausable {
         uint256 lockupInSeconds = lockupPeriod * 1 days;
 
         // Keep the existing reward tokens
-        address[] memory rewardTokens = tiers[id].rewardTokens;
+        address[] memory _rewardTokens = tiers[id].rewardTokens;
 
         tiers[id] = Tier({
             id: id,
@@ -288,7 +288,7 @@ contract KTTYStaking is AccessControl, ReentrancyGuard, Pausable {
             lockupPeriod: lockupInSeconds,
             apy: apy,
             isActive: isActive,
-            rewardTokens: rewardTokens
+            rewardTokens: _rewardTokens
         });
 
         emit TierUpdated(id, name, minStake, lockupInSeconds, apy, isActive);
