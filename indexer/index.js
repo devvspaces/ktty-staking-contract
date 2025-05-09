@@ -63,11 +63,11 @@ async function loadLastProcessedBlock() {
       return parseInt(value, 10);
     }
     // If not found in Redis, return default
-    return parseInt(process.env.STARTING_BLOCK, 10) || 0;
+    const currentBlock = await provider.getBlockNumber();
+    return currentBlock;
   } catch (error) {
     console.error("Error loading last processed block from Redis:", error);
-    // If Redis fails, return default
-    return parseInt(process.env.STARTING_BLOCK, 10) || 0;
+    throw error;
   }
 }
 
@@ -79,6 +79,7 @@ async function saveLastProcessedBlock(blockNumber) {
     console.log(`Last processed block updated to: ${lastProcessedBlock}`);
   } catch (error) {
     console.error("Error saving last processed block to Redis:", error);
+    throw error;
   }
 }
 
