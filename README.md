@@ -280,5 +280,13 @@ cast send \
   $(cast --to-wei "1000000")  \
   1 \
   --legacy
+
+
+cast send \
+  --rpc-url $RPC_URL \
+  --private-key $PRIVATE_KEY \
+  $STAKING_CONTRACT_ADDRESS \
+  "pause()" \
+  --legacy
   
 ```
