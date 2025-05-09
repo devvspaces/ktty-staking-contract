@@ -95,7 +95,7 @@ cast send \
   $(cast --to-wei "1")  \
   $(cast --to-wei "10")  \
   30 \
-  20000
+  20000 \
   --legacy
 
 # Update a tier on the staking contract
@@ -106,10 +106,104 @@ cast send \
   "updateTier(uint256,string,uint256,uint256,uint256,uint256,bool)" \
   1 \
   "Entry" \
-  $(cast --to-wei "1")  \
-  $(cast --to-wei "10")  \
+  $(cast --to-wei "1000000")  \
+  $(cast --to-wei "2900000")  \
   30 \
   20000 \
-  true
+  true \
   --legacy
+
+  
+cast send \
+  --rpc-url $RPC_URL \
+  --private-key $PRIVATE_KEY \
+  $STAKING_CONTRACT_ADDRESS \
+  "updateTier(uint256,string,uint256,uint256,uint256,uint256,bool)" \
+  2 \
+  "Intermediate" \
+  $(cast --to-wei "3000000")  \
+  $(cast --to-wei "5900000")  \
+  60 \
+  40000 \
+  true \
+  --legacy
+
+  
+cast send \
+  --rpc-url $RPC_URL \
+  --private-key $PRIVATE_KEY \
+  $STAKING_CONTRACT_ADDRESS \
+  "updateTier(uint256,string,uint256,uint256,uint256,uint256,bool)" \
+  3 \
+  "Advanced" \
+  $(cast --to-wei "6000000")  \
+  $(cast --to-wei "9900000")  \
+  90 \
+  100000 \
+  true \
+  --legacy
+
+  
+cast send \
+  --rpc-url $RPC_URL \
+  --private-key $PRIVATE_KEY \
+  $STAKING_CONTRACT_ADDRESS \
+  "updateTier(uint256,string,uint256,uint256,uint256,uint256,bool)" \
+  4 \
+  "Diamond" \
+  $(cast --to-wei "10000000")  \
+  $(cast --to-wei "19900000")  \
+  120 \
+  150000 \
+  true \
+  --legacy
+
+  
+cast send \
+  --rpc-url $RPC_URL \
+  --private-key $PRIVATE_KEY \
+  $STAKING_CONTRACT_ADDRESS \
+  "updateTier(uint256,string,uint256,uint256,uint256,uint256,bool)" \
+  5 \
+  "Platinum" \
+  $(cast --to-wei "20000000")  \
+  $(cast --to-wei "50000000")  \
+  180 \
+  250000 \
+  true \
+  --legacy
+
+
+# Mint tokens
+
+cast send \
+  --rpc-url $RPC_URL \
+  --private-key $PRIVATE_KEY \
+  "0x4c24d08Cd47894C7Af961325895381CB4216fd4D" \
+  "mint(address,uint256)" \
+  "0xA0Ca70DFB6Fb79fD5EF160D3EAc677868547ffEF" \
+  $(cast --to-wei "2000000000")  \
+  --legacy
+
+cast send \
+  --rpc-url $RPC_URL \
+  --private-key $PRIVATE_KEY \
+  "0x6F03FC28999a9230A5C8650b8d440098A8B52294" \
+  "allowance(address,address)" \
+  "0xA0Ca70DFB6Fb79fD5EF160D3EAc677868547ffEF" \
+  "0xEdE2bFf384ca4cfdBe4165ED7A02a55D1e10396c" \
+  --legacy
+
+
+# Stake
+
+cast send \
+  --rpc-url $RPC_URL \
+  --private-key $PRIVATE_KEY \
+  "0xEdE2bFf384ca4cfdBe4165ED7A02a55D1e10396c" \
+  "stake(uint256,uint256)" \
+  $(cast --to-wei "1000000")  \
+  1 \
+  --legacy
+  
 ```

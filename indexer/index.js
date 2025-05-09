@@ -1,5 +1,5 @@
 const { createClient } = require("@supabase/supabase-js");
-const { ethers } = require("ethers");
+const { ethers, formatEther } = require("ethers");
 const dotenv = require("dotenv");
 const fs = require("fs").promises;
 const path = require("path");
@@ -99,8 +99,8 @@ async function handleTierCreated(event) {
   await supabase.from("tiers").insert({
     id: tierId.toString(),
     name,
-    min_stake: minStake.toString(),
-    max_stake: tier.maxStake.toString(),
+    min_stake: parseFloat(formatEther(minStake)),
+    max_stake:  parseFloat(formatEther(tier.maxStake)),
     lockup_period: lockupPeriod.toString(),
     apy: apy.toString(),
     is_active: true,
@@ -109,12 +109,13 @@ async function handleTierCreated(event) {
 
 async function handleTierUpdated(event) {
   const { tierId, name, minStake, lockupPeriod, apy, isActive } = event.args;
-
+ const tier = await stakingContract.tiers(tierId);
   await supabase
     .from("tiers")
     .update({
       name,
-      min_stake: minStake.toString(),
+      min_stake: parseFloat(formatEther(minStake)),
+      max_stake: parseFloat(formatEther(tier.maxStake)),
       lockup_period: lockupPeriod.toString(),
       apy: apy.toString(),
       is_active: isActive,
@@ -223,7 +224,7 @@ async function handleStaked(event) {
   await supabase.from("stakes").insert({
     id: stakeId.toString(),
     owner,
-    amount: amount.toString(),
+    amount: parseFloat(formatEther(amount)),
     tier_id: tierId.toString(),
     start_time: startTime.toString(),
     end_time: endTime.toString(),
@@ -318,10 +319,10 @@ const EventHandlers = {
 };
 
 async function processHandlers(fromBlock, toBlock) {
-  for (const [eventName, { handler, filter }] of Object.entries(
+  for (const [_, { handler, filter }] of Object.entries(
     EventHandlers
   )) {
-    console.log(`Processing ${eventName} events`);
+    // console.log(`Processing ${eventName} events`);
     const events = await stakingContract.queryFilter(
       filter,
       fromBlock,
@@ -366,7 +367,7 @@ async function startIndexing() {
 
   // Process historical events (backfill)
   const currentBlock = await provider.getBlockNumber();
-  const batchSize = 100; // Adjust based on your RPC provider limits
+  const batchSize = 500; // Adjust based on your RPC provider limits
 
   for (
     let fromBlock = Number(lastProcessedBlock);
