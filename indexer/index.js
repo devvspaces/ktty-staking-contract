@@ -63,7 +63,7 @@ async function loadLastProcessedBlock() {
     }
     // If not found in Redis, return default
     const currentBlock = await provider.getBlockNumber();
-    return currentBlock;
+    return parseInt(process.env.STARTING_BLOCK || currentBlock.toString());
   } catch (error) {
     console.error("Error loading last processed block from Redis:", error);
     throw error;
