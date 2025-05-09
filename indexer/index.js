@@ -8,6 +8,8 @@ dotenv.config({
   path: "../.env",
 });
 
+POLL_TIME_INTERVAL = 5000; // 5 seconds
+
 // Supabase setup
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_KEY;
@@ -100,7 +102,7 @@ async function handleTierCreated(event) {
     id: tierId.toString(),
     name,
     min_stake: parseFloat(formatEther(minStake)),
-    max_stake:  parseFloat(formatEther(tier.maxStake)),
+    max_stake: parseFloat(formatEther(tier.maxStake)),
     lockup_period: lockupPeriod.toString(),
     apy: apy.toString(),
     is_active: true,
@@ -109,7 +111,7 @@ async function handleTierCreated(event) {
 
 async function handleTierUpdated(event) {
   const { tierId, name, minStake, lockupPeriod, apy, isActive } = event.args;
- const tier = await stakingContract.tiers(tierId);
+  const tier = await stakingContract.tiers(tierId);
   await supabase
     .from("tiers")
     .update({
@@ -319,9 +321,7 @@ const EventHandlers = {
 };
 
 async function processHandlers(fromBlock, toBlock) {
-  for (const [_, { handler, filter }] of Object.entries(
-    EventHandlers
-  )) {
+  for (const [_, { handler, filter }] of Object.entries(EventHandlers)) {
     // console.log(`Processing ${eventName} events`);
     const events = await stakingContract.queryFilter(
       filter,
@@ -336,36 +336,8 @@ async function processHandlers(fromBlock, toBlock) {
   await saveLastProcessedBlock(toBlock);
 }
 
-async function pollForEvents() {
-  try {
-    const currentBlock = await provider.getBlockNumber();
-
-    if (currentBlock > lastProcessedBlock) {
-      console.log(
-        `New blocks found: ${lastProcessedBlock + 1} to ${currentBlock}`
-      );
-
-      // Process events in the new blocks
-      const fromBlock = lastProcessedBlock + 1;
-      const toBlock = currentBlock;
-
-      await processHandlers(fromBlock, toBlock);
-    }
-  } catch (error) {
-    console.error("Error polling for events:", error);
-  }
-
-  // Poll again after a delay
-  setTimeout(pollForEvents, 15000); // 15 seconds
-}
-
-// Main indexing function
 async function startIndexing() {
-  // Load the last processed block from file
   lastProcessedBlock = await loadLastProcessedBlock();
-  console.log(`Starting indexer from block ${lastProcessedBlock}`);
-
-  // Process historical events (backfill)
   const currentBlock = await provider.getBlockNumber();
   const batchSize = 500; // Adjust based on your RPC provider limits
 
@@ -375,31 +347,29 @@ async function startIndexing() {
     fromBlock += batchSize
   ) {
     const toBlock = Math.min(fromBlock + batchSize - 1, currentBlock);
-
     console.log(`Processing blocks ${fromBlock} to ${toBlock}`);
-
     await processHandlers(fromBlock, toBlock);
   }
 
   console.log(
-    `Indexer caught up to block ${currentBlock}, now listening for new events`
+    `Finished processing historical events up to block ${currentBlock}`
   );
 
-  // // Start listening for new events
-  pollForEvents();
+  // Start listening for new events
+  setTimeout(startIndexing, POLL_TIME_INTERVAL);
   // stakingContract.on(tierCreatedFilter, handleTierCreated);
 }
 
 // Handle errors and ensure clean shutdown
 process.on("SIGINT", async () => {
   console.log("Shutting down indexer...");
-  // Remove event listeners
   stakingContract.removeAllListeners();
   process.exit(0);
 });
 
 // Start the indexer
+console.log(`Starting indexer`);
 startIndexing().catch((error) => {
-  console.error("Error in indexer:", error);
+  console.error(error);
   process.exit(1);
 });
