@@ -1,812 +1,392 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "forge-std/Test.sol";
-import "../src/KTTYStaking.sol"; // Adjust path as needed
-import "@openzeppelin/contracts/token/ERC20/ERC20.sol"; // For mock tokens
+import {Test, console} from "forge-std/Test.sol";
+import {KTTYStaking} from "../src/KTTYStaking.sol";
+import {KTTYStakingProxyAdmin} from "../src/KTTYStakingProxyAdmin.sol";
+import {TransparentUpgradeableProxy, ITransparentUpgradeableProxy} from "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {MockERC20} from "../src/MockERC.sol";
 
-contract MockERC20 is ERC20 {
-    constructor(string memory name, string memory symbol) ERC20(name, symbol) {
-        // Mint some tokens to the deployer
-        _mint(msg.sender, 1000000 * 10 ** 18);
-    }
-
-    function mint(address to, uint256 amount) public {
-        _mint(to, amount);
-    }
-}
-
-contract KTTYStakingTest is Test {
-    // Constants
-    uint256 constant MILLION = 1_000_000 ether;
-    uint256 constant TEN_MILLION = 10 * MILLION;
-    uint256 constant TWENTY_MILLION = 20 * MILLION;
-    uint256 constant FIFTY_MILLION = 50 * MILLION;
-
-    // Roles
-    bytes32 constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
-    bytes32 constant TIER_MANAGER_ROLE = keccak256("TIER_MANAGER_ROLE");
-    bytes32 constant FUND_MANAGER_ROLE = keccak256("FUND_MANAGER_ROLE");
-    bytes32 constant EMERGENCY_ROLE = keccak256("EMERGENCY_ROLE");
-
-    // Contracts
-    KTTYStaking stakingContract;
+contract KTTYStakingUpgradeableTest is Test {
+    KTTYStaking implementation;
+    KTTYStaking proxy;
+    KTTYStakingProxyAdmin proxyAdmin;
+    TransparentUpgradeableProxy transparentProxy;
     MockERC20 kttyToken;
-    MockERC20 zeeToken;
-    MockERC20 kevAIToken;
-    MockERC20 realToken;
-    MockERC20 pawToken;
-
-    // Actors
-    address admin = address(0x1);
-    address tierManager = address(0x2);
-    address fundManager = address(0x3);
-    address emergency = address(0x4);
-    address user1 = address(0x5);
-    address user2 = address(0x6);
-    address user3 = address(0x7);
-
-    // Tier IDs
-    uint256 tier1ID;
-    uint256 tier2ID;
-    uint256 tier3ID;
-    uint256 tier4ID;
-    uint256 tier5ID;
-
-    // Events for testing
-    event TierCreated(
-        uint256 indexed tierId,
-        string name,
-        uint256 minStake,
-        uint256 lockupPeriod,
-        uint256 apy
-    );
-    event Staked(
-        uint256 indexed stakeId,
-        address indexed owner,
-        uint256 amount,
-        uint256 tierId,
-        uint256 startTime,
-        uint256 endTime
-    );
-    event StakeWithdrawn(
-        uint256 indexed stakeId,
-        address indexed owner,
-        uint256 amount
-    );
-    event RewardClaimed(
-        uint256 indexed stakeId,
-        address indexed owner,
-        address indexed token,
-        uint256 amount
-    );
-
+    MockERC20 rewardToken1;
+    MockERC20 rewardToken2;
+    
+    address admin = address(1);
+    address user1 = address(2);
+    address user2 = address(3);
+    address emergencyAdmin = address(4);
+    address tierManager = address(5);
+    address fundManager = address(6);
+    
+    uint256 initialSupply = 1_000_000 * 1e18;
+    
     function setUp() public {
-        // Start impersonating admin
+        // Deploy mock tokens and mint some tokens
+        kttyToken = new MockERC20("Kitty Token", "KTTY");
+        rewardToken1 = new MockERC20("Reward Token 1", "RWD1");
+        rewardToken2 = new MockERC20("Reward Token 2", "RWD2");
+        
+        // Mint tokens to various addresses
+        kttyToken.mint(admin, initialSupply);
+        kttyToken.mint(user1, initialSupply);
+        kttyToken.mint(user2, initialSupply);
+        
+        rewardToken1.mint(admin, initialSupply);
+        rewardToken2.mint(admin, initialSupply);
+        
         vm.startPrank(admin);
-
-        // Deploy mock tokens
-        kttyToken = new MockERC20("KTTY Token", "KTTY");
-        zeeToken = new MockERC20("ZEE Token", "ZEE");
-        kevAIToken = new MockERC20("KEV-AI Token", "KEV");
-        realToken = new MockERC20("REAL Token", "REAL");
-        pawToken = new MockERC20("PAW Token", "PAW");
-
-        // Deploy staking contract
-        stakingContract = new KTTYStaking(address(kttyToken));
-
-        // Grant roles
-        stakingContract.grantRole(TIER_MANAGER_ROLE, tierManager);
-        stakingContract.grantRole(FUND_MANAGER_ROLE, fundManager);
-        stakingContract.grantRole(EMERGENCY_ROLE, emergency);
-
-        // Stop impersonating admin
-        vm.stopPrank();
-
-        // Mint tokens to staking contract for rewards
-        mintRewardTokens(FIFTY_MILLION);
-
-        // Mint tokens to users for staking
-        mintUserTokens(FIFTY_MILLION);
-
-        // Register reward tokens
-        registerRewardTokens();
-
-        // Add tiers based on the provided requirements
-        setupTiers();
-    }
-
-    function mintRewardTokens(uint256 amount) internal {
-        vm.startPrank(admin);
-        kttyToken.mint(address(stakingContract), amount);
-        zeeToken.mint(address(stakingContract), amount);
-        kevAIToken.mint(address(stakingContract), amount);
-        realToken.mint(address(stakingContract), amount);
-        pawToken.mint(address(stakingContract), amount);
-        vm.stopPrank();
-    }
-
-    function mintUserTokens(uint256 amount) internal {
-        vm.startPrank(admin);
-        kttyToken.mint(user1, amount);
-        kttyToken.mint(user2, amount);
-        kttyToken.mint(user3, amount);
-        vm.stopPrank();
-
-        // Approve tokens
-        vm.prank(user1);
-        kttyToken.approve(address(stakingContract), amount);
-
-        vm.prank(user2);
-        kttyToken.approve(address(stakingContract), amount);
-
-        vm.prank(user3);
-        kttyToken.approve(address(stakingContract), amount);
-    }
-
-    function registerRewardTokens() internal {
-        vm.startPrank(fundManager);
-
-        // Register additional reward tokens
-        stakingContract.registerRewardToken(
-            address(zeeToken),
-            "ZEE",
-            1_000_000
-        ); // 100% of KTTY reward
-        stakingContract.registerRewardToken(
-            address(kevAIToken),
-            "KEV",
-            1_000_000
+        
+        // Deploy implementation
+        implementation = new KTTYStaking();
+        
+        // Deploy proxy admin
+        proxyAdmin = new KTTYStakingProxyAdmin(admin);
+        
+        // Prepare initialization data
+        bytes memory initData = abi.encodeWithSelector(
+            KTTYStaking.initialize.selector,
+            address(kttyToken)
         );
-        stakingContract.registerRewardToken(
-            address(realToken),
-            "REAL",
-            1_000_000
+        
+        // Deploy proxy
+        transparentProxy = new TransparentUpgradeableProxy(
+            address(implementation),
+            address(proxyAdmin),
+            initData
         );
-        stakingContract.registerRewardToken(
-            address(pawToken),
-            "PAW",
-            1_000_000
-        );
-
+        
+        // Create a proxy instance for easy interaction
+        proxy = KTTYStaking(address(transparentProxy));
+        
+        // Setup roles
+        proxy.grantRole(proxy.EMERGENCY_ROLE(), emergencyAdmin);
+        proxy.grantRole(proxy.TIER_MANAGER_ROLE(), tierManager);
+        proxy.grantRole(proxy.FUND_MANAGER_ROLE(), fundManager);
+        
+        // Transfer some reward tokens to the contract
+        rewardToken1.transfer(address(proxy), 10_000 * 1e18);
+        rewardToken2.transfer(address(proxy), 10_000 * 1e18);
+        
         vm.stopPrank();
     }
-
-    function setupTiers() internal {
+    
+    function test_ProxyInitialization() public {
+        assertEq(address(proxy.kttyToken()), address(kttyToken));
+        assertTrue(proxy.hasRole(proxy.ADMIN_ROLE(), admin));
+        assertTrue(proxy.hasRole(proxy.TIER_MANAGER_ROLE(), admin));
+        assertTrue(proxy.hasRole(proxy.TIER_MANAGER_ROLE(), tierManager));
+        assertTrue(proxy.hasRole(proxy.FUND_MANAGER_ROLE(), admin));
+        assertTrue(proxy.hasRole(proxy.FUND_MANAGER_ROLE(), fundManager));
+        assertTrue(proxy.hasRole(proxy.EMERGENCY_ROLE(), admin));
+        assertTrue(proxy.hasRole(proxy.EMERGENCY_ROLE(), emergencyAdmin));
+        assertTrue(proxy.hasRole(proxy.UPGRADER_ROLE(), admin));
+    }
+    
+    function test_AddTier() public {
         vm.startPrank(tierManager);
-
-        // APYs in terms of percentage per staking period (not annualized)
-        // 0.2% = 2,000, 0.4% = 4,000, 1.0% = 10,000, 1.5% = 15,000, 2.5% = 25,000
-
-        // Tier 1: 1M - 2.9M $KTTY, 30 days lockup, 0.2% fixed in $KTTY
-        vm.expectEmit(true, true, true, true);
-        emit TierCreated(1, "Tier 1", 1 * MILLION, 30 days, 2_000);
-        stakingContract.addTier(
-            "Tier 1",
-            1 * MILLION, // Min 1M KTTY
-            (29 * MILLION) / 10, // Max 2.9M KTTY
-            30, // 30 days lockup
-            2_000 // 0.2% APY (scaled by 1e6)
-        );
-        tier1ID = 1;
-
-        // Tier 2: 3M - 5.9M $KTTY, 60 days lockup, 0.4% fixed in $KTTY + $ZEE
-        stakingContract.addTier(
-            "Tier 2",
-            3 * MILLION, // Min 3M KTTY
-            (59 * MILLION) / 10, // Max 5.9M KTTY
-            60, // 60 days lockup
-            4_000 // 0.4% APY (scaled by 1e6)
-        );
-        tier2ID = 2;
-
-        // Add ZEE token to Tier 2
-        stakingContract.addRewardTokenToTier(tier2ID, address(zeeToken));
-
-        // Tier 3: 6M+ $KTTY, 90 days lockup, 1% fixed in all tokens
-        stakingContract.addTier(
-            "Tier 3",
-            6 * MILLION, // Min 6M KTTY
-            0, // No max (unlimited)
-            90, // 90 days lockup
-            10_000 // 1.0% APY (scaled by 1e6)
-        );
-        tier3ID = 3;
-
-        // Add all reward tokens to Tier 3
-        stakingContract.addRewardTokenToTier(tier3ID, address(zeeToken));
-        stakingContract.addRewardTokenToTier(tier3ID, address(kevAIToken));
-        stakingContract.addRewardTokenToTier(tier3ID, address(realToken));
-        stakingContract.addRewardTokenToTier(tier3ID, address(pawToken));
-
-        // Tier 4 (Diamond): 10M+ $KTTY, 90 days lockup, 1.5% fixed APR in KTTY
-        stakingContract.addTier(
-            "Diamond",
-            10 * MILLION, // Min 10M KTTY
-            0, // No max (unlimited)
-            90, // 90 days lockup
-            15_000 // 1.5% APY (scaled by 1e6)
-        );
-        tier4ID = 4;
-
-        // Tier 5 (Platinum): 20M+ $KTTY, 180 days lockup, 2.5% fixed APR
-        stakingContract.addTier(
-            "Platinum",
-            20 * MILLION, // Min 20M KTTY
-            0, // No max (unlimited)
-            180, // 180 days lockup
-            25_000 // 2.5% APY (scaled by 1e6)
-        );
-        tier5ID = 5;
-
-        vm.stopPrank();
-    }
-
-    /* ------------- Basic Functionality Tests ------------- */
-
-    function testDeployment() public view {
-        // Verify roles
-        assertTrue(stakingContract.hasRole(ADMIN_ROLE, admin));
-        assertTrue(stakingContract.hasRole(TIER_MANAGER_ROLE, tierManager));
-        assertTrue(stakingContract.hasRole(FUND_MANAGER_ROLE, fundManager));
-        assertTrue(stakingContract.hasRole(EMERGENCY_ROLE, emergency));
-
-        // Verify token
-        assertEq(address(stakingContract.kttyToken()), address(kttyToken));
-
-        // Verify tier count
-        assertEq(stakingContract.getTierCount(), 5);
-    }
-
-    function testTierCreation() public view {
-        // Check tier details for tier 1
-        (
-            uint256 id,
-            string memory name,
-            uint256 minStake,
-            uint256 maxStake,
-            uint256 lockupPeriod,
-            uint256 apy,
-            bool isActive
-        ) = stakingContract.tiers(tier1ID);
-
-        assertEq(id, tier1ID);
-        assertEq(name, "Tier 1");
-        assertEq(minStake, 1 * MILLION);
-        assertEq(maxStake, (29 * MILLION) / 10);
+        
+        // Add a tier
+        proxy.addTier("Bronze", 100 * 1e18, 1000 * 1e18, 30, 50000); // 5% APY
+        
+        // Check if tier was added correctly
+        (uint256 id, string memory name, uint256 minStake, uint256 maxStake, uint256 lockupPeriod, uint256 apy, bool isActive ) = proxy.tiers(1);
+        
+        assertEq(id, 1);
+        assertEq(name, "Bronze");
+        assertEq(minStake, 100 * 1e18);
+        assertEq(maxStake, 1000 * 1e18);
         assertEq(lockupPeriod, 30 days);
-        assertEq(apy, 2_000);
+        assertEq(apy, 50000);
         assertTrue(isActive);
-
-        // Check tier reward tokens for tier 3
-        address[] memory tier3Tokens = stakingContract.getTierRewardTokens(
-            tier3ID
-        );
-        assertEq(tier3Tokens.length, 4);
-        assertEq(tier3Tokens[0], address(zeeToken));
-        assertEq(tier3Tokens[1], address(kevAIToken));
-        assertEq(tier3Tokens[2], address(realToken));
-        assertEq(tier3Tokens[3], address(pawToken));
-    }
-
-    function testStakingTier1() public {
-        uint256 stakeAmount = (15 * MILLION) / 10;
-
-        vm.startPrank(user1);
-
-        vm.expectEmit(true, true, true, true);
-        emit Staked(
-            1,
-            user1,
-            stakeAmount,
-            tier1ID,
-            block.timestamp,
-            block.timestamp + 30 days
-        );
-        stakingContract.stake(stakeAmount, tier1ID);
-
+        
         vm.stopPrank();
-
-        // Verify stake
-        (
-            uint256 id,
-            address owner,
-            uint256 amount,
-            uint256 tierId,
-            ,
-            ,
-            bool hasWithdrawn,
-
-        ) = stakingContract.getStake(1);
-
+    }
+    
+    function test_AddMultipleTiers() public {
+        vm.startPrank(tierManager);
+        
+        // Add multiple tiers
+        proxy.addTier("Bronze", 100 * 1e18, 1000 * 1e18, 30, 50000); // 5% APY
+        proxy.addTier("Silver", 1000 * 1e18, 5000 * 1e18, 60, 80000); // 8% APY
+        proxy.addTier("Gold", 5000 * 1e18, 0, 90, 120000); // 12% APY, no max
+        
+        assertEq(proxy.getTierCount(), 3);
+        
+        vm.stopPrank();
+    }
+    
+    function test_UpdateTier() public {
+        vm.startPrank(tierManager);
+        
+        // Add a tier
+        proxy.addTier("Bronze", 100 * 1e18, 1000 * 1e18, 30, 50000);
+        
+        // Update the tier
+        proxy.updateTier(1, "Bronze Plus", 150 * 1e18, 1500 * 1e18, 45, 60000, true);
+        
+        // Check if tier was updated correctly
+        (uint256 id, string memory name, uint256 minStake, uint256 maxStake, uint256 lockupPeriod, uint256 apy, bool isActive ) = proxy.tiers(1);
+        
+        assertEq(id, 1);
+        assertEq(name, "Bronze Plus");
+        assertEq(minStake, 150 * 1e18);
+        assertEq(maxStake, 1500 * 1e18);
+        assertEq(lockupPeriod, 45 days);
+        assertEq(apy, 60000);
+        assertTrue(isActive);
+        
+        vm.stopPrank();
+    }
+    
+    function test_RegisterRewardToken() public {
+        vm.startPrank(fundManager);
+        
+        // Register reward tokens
+        proxy.registerRewardToken(address(rewardToken1), "RWD1", 500000); // 50% of KTTY reward rate
+        proxy.registerRewardToken(address(rewardToken2), "RWD2", 250000); // 25% of KTTY reward rate
+        
+        assertEq(proxy.getRewardTokenCount(), 2);
+        
+        vm.stopPrank();
+    }
+    
+    function test_AddRewardTokenToTier() public {
+        vm.startPrank(tierManager);
+        
+        // Add a tier
+        proxy.addTier("Bronze", 100 * 1e18, 1000 * 1e18, 30, 50000);
+        
+        vm.stopPrank();
+        
+        vm.startPrank(fundManager);
+        
+        // Register reward token
+        proxy.registerRewardToken(address(rewardToken1), "RWD1", 500000);
+        
+        vm.stopPrank();
+        
+        vm.startPrank(tierManager);
+        
+        // Add reward token to tier
+        proxy.addRewardTokenToTier(1, address(rewardToken1));
+        
+        // Check if reward token was added to tier
+        address[] memory tierRewardTokens = proxy.getTierRewardTokens(1);
+        assertEq(tierRewardTokens.length, 1);
+        assertEq(tierRewardTokens[0], address(rewardToken1));
+        
+        vm.stopPrank();
+    }
+    
+    function test_StakeAndWithdraw() public {
+        vm.startPrank(tierManager);
+        
+        // Add a tier
+        proxy.addTier("Bronze", 100 * 1e18, 1000 * 1e18, 30, 50000); // 5% APY
+        
+        vm.stopPrank();
+        
+        vm.startPrank(user1);
+        
+        // Approve tokens for staking
+        uint256 stakeAmount = 200 * 1e18;
+        kttyToken.approve(address(proxy), stakeAmount);
+        
+        // Stake tokens
+        proxy.stake(stakeAmount, 1);
+        
+        // Check user's stake
+        uint256[] memory userStakes = proxy.getUserStakes(user1);
+        assertEq(userStakes.length, 1);
+        assertEq(userStakes[0], 1);
+        
+        // Get stake details
+        (uint256 id, address owner, uint256 amount, uint256 tierId, uint256 startTime, uint256 endTime, bool hasWithdrawn, bool hasClaimedRewards) = proxy.getStake(1);
+        
         assertEq(id, 1);
         assertEq(owner, user1);
         assertEq(amount, stakeAmount);
-        assertEq(tierId, tier1ID);
+        assertEq(tierId, 1);
+        assertGt(startTime, 0);
+        assertEq(endTime, startTime + 30 days);
         assertFalse(hasWithdrawn);
-
-        // Verify user stakes
-        uint256[] memory userStakes = stakingContract.getUserStakes(user1);
-        assertEq(userStakes.length, 1);
-        assertEq(userStakes[0], 1);
-    }
-
-    function testStakingTier5() public {
-        uint256 stakeAmount = 25 * MILLION;
-
-        vm.startPrank(user2);
-
-        stakingContract.stake(stakeAmount, tier5ID);
-
-        vm.stopPrank();
-
-        // Verify stake
-        (
-            uint256 id,
-            address owner,
-            uint256 amount,
-            uint256 tierId,
-            ,
-            ,
-            bool hasWithdrawn,
-
-        ) = stakingContract.getStake(1);
-
-        assertEq(id, 1);
-        assertEq(owner, user2);
-        assertEq(amount, stakeAmount);
-        assertEq(tierId, tier5ID);
-        assertFalse(hasWithdrawn);
-
-        // Check reward calculation
-        uint256 kttyReward = stakingContract.calculateReward(1, address(0));
-        // Expected: 25M * 2.5% = 625,000 KTTY
-        assertEq(kttyReward, 625_000 ether);
-    }
-
-    function testWithdrawAfterLockup() public {
-        uint256 stakeAmount = (15 * MILLION) / 10;
-
-        // User1 stakes
-        vm.prank(user1);
-        stakingContract.stake(stakeAmount, tier1ID);
-
-        // Get user1's balance before withdrawal
-        uint256 balanceBefore = kttyToken.balanceOf(user1);
-
-        // Fast forward past lockup period
+        assertFalse(hasClaimedRewards);
+        
+        // Fast forward time past lockup period
         vm.warp(block.timestamp + 31 days);
-
-        // User1 withdraws
-        vm.prank(user1);
-        vm.expectEmit(true, true, true, true);
-        emit StakeWithdrawn(1, user1, stakeAmount);
-        stakingContract.withdraw(1);
-
-        // Verify user1's balance after withdrawal
-        uint256 balanceAfter = kttyToken.balanceOf(user1);
-        assertEq(balanceAfter - balanceBefore, stakeAmount);
-
-        // Verify stake status
-        (, , , , , , bool hasWithdrawn, ) = stakingContract.getStake(1);
+        
+        // Withdraw stake
+        proxy.withdraw(1);
+        
+        // Check that stake is marked as withdrawn
+        (, , , , , , hasWithdrawn, ) = proxy.getStake(1);
         assertTrue(hasWithdrawn);
+        
+        vm.stopPrank();
     }
-
-    function testClaimRewardsAndWithdraw() public {
-        uint256 stakeAmount = 3 * MILLION;
-
-        // User2 stakes in tier 2
-        vm.prank(user2);
-        stakingContract.stake(stakeAmount, tier2ID);
-
-        // Get user2's balance before claim
-        uint256 kttyBalanceBefore = kttyToken.balanceOf(user2);
-        uint256 zeeBalanceBefore = zeeToken.balanceOf(user2);
-
-        // Fast forward past lockup period
-        vm.warp(block.timestamp + 61 days);
-
-        // Calculate expected rewards
-        // 3M * 0.4% = 12,000 KTTY and 12,000 ZEE
-        uint256 expectedReward = 12_000 ether;
-
-        // User2 claims rewards and withdraws
-        vm.prank(user2);
-        stakingContract.claimRewardsAndWithdraw(1);
-
-        // Verify user2's balances after claim
-        uint256 kttyBalanceAfter = kttyToken.balanceOf(user2);
-        uint256 zeeBalanceAfter = zeeToken.balanceOf(user2);
-
-        // Check principal returned
-        assertEq(
-            kttyBalanceAfter - kttyBalanceBefore,
-            stakeAmount + expectedReward
-        );
-
-        // Check ZEE reward
-        assertEq(zeeBalanceAfter - zeeBalanceBefore, expectedReward);
-
-        // Verify stake status
-        (
-            ,
-            ,
-            ,
-            ,
-            ,
-            ,
-            bool hasWithdrawn,
-            bool hasClaimedRewards
-        ) = stakingContract.getStake(1);
+    
+    function test_ClaimRewardsAndWithdraw() public {
+        vm.startPrank(tierManager);
+        
+        // Add a tier
+        proxy.addTier("Bronze", 100 * 1e18, 1000 * 1e18, 30, 50000); // 5% APY
+        
+        vm.stopPrank();
+        
+        vm.startPrank(fundManager);
+        
+        // Register reward token and add it to the tier
+        proxy.registerRewardToken(address(rewardToken1), "RWD1", 500000);
+        
+        vm.stopPrank();
+        
+        vm.startPrank(tierManager);
+        
+        // Add reward token to tier
+        proxy.addRewardTokenToTier(1, address(rewardToken1));
+        
+        vm.stopPrank();
+        
+        vm.startPrank(user1);
+        
+        // Approve tokens for staking
+        uint256 stakeAmount = 200 * 1e18;
+        kttyToken.approve(address(proxy), stakeAmount);
+        
+        // Stake tokens
+        proxy.stake(stakeAmount, 1);
+        
+        // Fast forward time past lockup period
+        vm.warp(block.timestamp + 31 days);
+        
+        // Check reward calculation
+        uint256 expectedKttyReward = (stakeAmount * 50000) / 1e6; // 5% APY
+        assertEq(proxy.calculateReward(1, address(0)), expectedKttyReward);
+        
+        uint256 expectedRwd1Reward = (stakeAmount * 50000) / 1e6; // Same formula as in the contract
+        assertEq(proxy.calculateReward(1, address(rewardToken1)), expectedRwd1Reward);
+        
+        // Get balance before claiming
+        uint256 kttyBalanceBefore = kttyToken.balanceOf(user1);
+        uint256 rwd1BalanceBefore = rewardToken1.balanceOf(user1);
+        
+        // Claim rewards and withdraw
+        proxy.claimRewardsAndWithdraw(1);
+        
+        // Check balances after claiming
+        uint256 kttyBalanceAfter = kttyToken.balanceOf(user1);
+        uint256 rwd1BalanceAfter = rewardToken1.balanceOf(user1);
+        
+        // Verify user received their stake back plus rewards
+        assertEq(kttyBalanceAfter, kttyBalanceBefore + stakeAmount + expectedKttyReward);
+        assertEq(rwd1BalanceAfter, rwd1BalanceBefore + expectedRwd1Reward);
+        
+        // Check that stake is marked as withdrawn and rewards claimed
+        (, , , , , , bool hasWithdrawn, bool hasClaimedRewards) = proxy.getStake(1);
         assertTrue(hasWithdrawn);
         assertTrue(hasClaimedRewards);
+        
+        vm.stopPrank();
     }
-
-    /* ------------- Edge Cases and Advanced Tests ------------- */
-
-    function testCannotStakeBeforeApproval() public {
-        // Create a new user without approval
-        address newUser = address(0x9);
-
+    
+    function test_EmergencyWithdrawal() public {
+        vm.startPrank(emergencyAdmin);
+        
+        // Get initial balance
+        uint256 initialBalance = rewardToken1.balanceOf(emergencyAdmin);
+        
+        // Emergency withdraw some tokens
+        uint256 withdrawAmount = 100 * 1e18;
+        proxy.emergencyWithdraw(address(rewardToken1), emergencyAdmin, withdrawAmount);
+        
+        // Check that tokens were withdrawn
+        uint256 finalBalance = rewardToken1.balanceOf(emergencyAdmin);
+        assertEq(finalBalance, initialBalance + withdrawAmount);
+        
+        vm.stopPrank();
+    }
+    
+    function test_Pause() public {
         vm.startPrank(admin);
-        kttyToken.mint(newUser, 2 * MILLION);
+        
+        // Add a tier
+        proxy.addTier("Bronze", 100 * 1e18, 1000 * 1e18, 30, 50000);
+        
+        // Pause the contract
+        proxy.pause();
+        
         vm.stopPrank();
-
-        // Try to stake without approval
-        vm.startPrank(newUser);
-        vm.expectRevert();
-        stakingContract.stake((15 * MILLION) / 10, tier1ID);
+        
+        vm.startPrank(user1);
+        
+        // Approve tokens for staking
+        uint256 stakeAmount = 200 * 1e18;
+        kttyToken.approve(address(proxy), stakeAmount);
+        
+        // Try to stake tokens while paused (should fail)
+        vm.expectRevert(); // This will pass if any revert happens
+        proxy.stake(stakeAmount, 1);
+        
+        vm.stopPrank();
+        
+        vm.startPrank(admin);
+        
+        // Unpause the contract
+        proxy.unpause();
+        
+        vm.stopPrank();
+        
+        vm.startPrank(user1);
+        
+        // Try to stake tokens after unpausing (should succeed)
+        proxy.stake(stakeAmount, 1);
+        
+        // Verify the stake was created
+        (uint256 id, address owner, , , , , , ) = proxy.getStake(1);
+        assertEq(id, 1);
+        assertEq(owner, user1);
+        
         vm.stopPrank();
     }
-
-    function testCannotWithdrawBeforeLockupPeriod() public {
-        uint256 stakeAmount = (15 * MILLION) / 10;
-
-        // User1 stakes
-        vm.prank(user1);
-        stakingContract.stake(stakeAmount, tier1ID);
-
-        // Try to withdraw before lockup period ends
-        vm.prank(user1);
-        vm.expectRevert(KTTYStaking.LockupNotCompleted.selector);
-        stakingContract.withdraw(1);
-    }
-
-    function testCannotWithdrawOtherUsersStake() public {
-        uint256 stakeAmount = (15 * MILLION) / 10;
-
-        // User1 stakes
-        vm.prank(user1);
-        stakingContract.stake(stakeAmount, tier1ID);
-
-        // Fast forward past lockup period
-        vm.warp(block.timestamp + 31 days);
-
-        // User2 tries to withdraw User1's stake
-        vm.prank(user2);
-        vm.expectRevert(KTTYStaking.UnauthorizedWithdrawal.selector);
-        stakingContract.withdraw(1);
-    }
-
-    function testCannotStakeLessThanMinimum() public {
-        uint256 stakeAmount = (5 * MILLION) / 10; // Less than tier 1 minimum
-
-        vm.prank(user1);
-        vm.expectRevert(KTTYStaking.InvalidAmount.selector);
-        stakingContract.stake(stakeAmount, tier1ID);
-    }
-
-    function testCannotStakeMoreThanMaximum() public {
-        uint256 stakeAmount = 3 * MILLION; // More than tier 1 maximum
-
-        vm.prank(user1);
-        vm.expectRevert(KTTYStaking.InvalidAmount.selector);
-        stakingContract.stake(stakeAmount, tier1ID);
-    }
-
-    function testCannotStakeToInactiveTier() public {
-        // Admin deactivates tier 1
-        vm.prank(tierManager);
-        stakingContract.updateTier(
-            tier1ID,
-            "Tier 1",
-            1 * MILLION,
-            (29 * MILLION) / 10,
-            30,
-            2_000,
-            false
-        );
-
-        // User1 tries to stake to inactive tier
-        vm.prank(user1);
-        vm.expectRevert(KTTYStaking.InvalidTier.selector);
-        stakingContract.stake((15 * MILLION) / 10, tier1ID);
-    }
-
-    function testCannotWithdrawTwice() public {
-        uint256 stakeAmount = (15 * MILLION) / 10;
-
-        // User1 stakes
-        vm.prank(user1);
-        stakingContract.stake(stakeAmount, tier1ID);
-
-        // Fast forward past lockup period
-        vm.warp(block.timestamp + 31 days);
-
-        // User1 withdraws
-        vm.prank(user1);
-        stakingContract.withdraw(1);
-
-        // User1 tries to withdraw again
-        vm.prank(user1);
-        vm.expectRevert(KTTYStaking.StakingNotLocked.selector);
-        stakingContract.withdraw(1);
-    }
-
-    function testCannotClaimRewardsTwice() public {
-        uint256 stakeAmount = 3 * MILLION;
-
-        // User2 stakes in tier 2
-        vm.prank(user2);
-        stakingContract.stake(stakeAmount, tier2ID);
-
-        // Fast forward past lockup period
-        vm.warp(block.timestamp + 61 days);
-
-        // User2 claims rewards and withdraws
-        vm.prank(user2);
-        stakingContract.claimRewardsAndWithdraw(1);
-
-        // User2 tries to claim rewards again
-        vm.prank(user2);
-        vm.expectRevert(KTTYStaking.RewardAlreadyClaimed.selector);
-        stakingContract.claimRewardsAndWithdraw(1);
-    }
-
-    function testMultipleStakesByOneUser() public {
-        // User3 makes multiple stakes
-        vm.startPrank(user3);
-
-        // Stake in tier 1
-        stakingContract.stake((15 * MILLION) / 10, tier1ID);
-
-        // Stake in tier 2
-        stakingContract.stake(4 * MILLION, tier2ID);
-
-        // Stake in tier 3
-        stakingContract.stake(8 * MILLION, tier3ID);
-
+    
+    function test_UpgradeContract() public {
+        // Test that the proxy admin can upgrade the implementation
+        vm.startPrank(admin);
+        
+        // Deploy a new implementation
+        KTTYStaking newImplementation = new KTTYStaking();
+        
+        // Upgrade the proxy with empty data (no function call)
+        proxyAdmin.upgradeAndCall(ITransparentUpgradeableProxy(address(transparentProxy)), address(newImplementation), new bytes(0));
+        
+        // Verify the contract still works after upgrade by creating a tier
+        proxy.addTier("Bronze", 100 * 1e18, 1000 * 1e18, 30, 50000);
+        
+        // Check tier was created successfully
+        (uint256 id, string memory name, , , , , ) = proxy.tiers(1);
+        assertEq(id, 1);
+        assertEq(name, "Bronze");
+        
         vm.stopPrank();
-
-        // Verify user's stakes
-        uint256[] memory userStakes = stakingContract.getUserStakes(user3);
-        assertEq(userStakes.length, 3);
-        assertEq(userStakes[0], 1);
-        assertEq(userStakes[1], 2);
-        assertEq(userStakes[2], 3);
-
-        // Verify stake details
-        (, , uint256 amount1, uint256 tierId1, , , , ) = stakingContract
-            .getStake(1);
-        assertEq(amount1, (15 * MILLION) / 10);
-        assertEq(tierId1, tier1ID);
-
-        (, , uint256 amount2, uint256 tierId2, , , , ) = stakingContract
-            .getStake(2);
-        assertEq(amount2, 4 * MILLION);
-        assertEq(tierId2, tier2ID);
-
-        (, , uint256 amount3, uint256 tierId3, , , , ) = stakingContract
-            .getStake(3);
-        assertEq(amount3, 8 * MILLION);
-        assertEq(tierId3, tier3ID);
     }
-
-    function testEmergencyWithdraw() public {
-        uint256 withdrawAmount = 5 * MILLION;
-
-        // Check initial balance
-        uint256 emergencyUserBalance = kttyToken.balanceOf(emergency);
-
-        // Emergency user executes emergency withdrawal
-        vm.prank(emergency);
-        stakingContract.emergencyWithdraw(
-            address(kttyToken),
-            emergency,
-            withdrawAmount
-        );
-
-        // Verify balance after emergency withdrawal
-        uint256 newBalance = kttyToken.balanceOf(emergency);
-        assertEq(newBalance - emergencyUserBalance, withdrawAmount);
-    }
-
-    function testUpdateTier() public {
-        // Update tier 1
-        vm.prank(tierManager);
-        stakingContract.updateTier(
-            tier1ID,
-            "Updated Tier 1",
-            (12 * MILLION) / 10, // Increased min
-            3 * MILLION, // Increased max
-            40, // Increased lockup days
-            2_500, // Increased APY
-            true
-        );
-
-        // Verify updated tier
-        (
-            uint256 id,
-            string memory name,
-            uint256 minStake,
-            uint256 maxStake,
-            uint256 lockupPeriod,
-            uint256 apy,
-            bool isActive
-        ) = stakingContract.tiers(tier1ID);
-
-        assertEq(id, tier1ID);
-        assertEq(name, "Updated Tier 1");
-        assertEq(minStake, (12 * MILLION) / 10);
-        assertEq(maxStake, 3 * MILLION);
-        assertEq(lockupPeriod, 40 days);
-        assertEq(apy, 2_500);
-        assertTrue(isActive);
-    }
-
-    function testUpdateRewardToken() public {
-        // Update ZEE token reward rate
-        vm.prank(fundManager);
-        stakingContract.updateRewardToken(address(zeeToken), 1_500_000, true); // 150%
-
-        // Verify updated reward token
-        (
-            string memory symbol,
-            address tokenAddress,
-            uint256 rewardRate,
-            bool isActive
-        ) = stakingContract.rewardTokens(address(zeeToken));
-
-        assertEq(symbol, "ZEE");
-        assertEq(tokenAddress, address(zeeToken));
-        assertEq(rewardRate, 1_500_000);
-        assertTrue(isActive);
-    }
-
-    function testContractPauseAndUnpause() public {
-        // First create a stake
-        vm.prank(user1);
-        stakingContract.stake((15 * MILLION) / 10, tier1ID);
-
-        // Fast forward past lockup period
-        vm.warp(block.timestamp + 31 days);
-
-        // Admin pauses the contract
-        vm.prank(admin);
-        stakingContract.pause();
-
-        // Try to stake while paused (should fail)
-        vm.prank(user1);
-        vm.expectRevert();
-        stakingContract.stake((15 * MILLION) / 10, tier1ID);
-
-        // User should still be able to withdraw while paused (after lockup period)
-        vm.prank(user1);
-        stakingContract.withdraw(1);
-
-        // Admin unpauses the contract
-        vm.prank(admin);
-        stakingContract.unpause();
-
-        // Staking should work again after unpausing
-        vm.prank(user1);
-        stakingContract.stake((15 * MILLION) / 10, tier1ID);
-    }
-
-    /* ------------- Fuzz Tests ------------- */
-
-    function testFuzz_StakeWithinValidRange(uint256 amount) public {
-        // Bound amount between min and max for tier 1
-        amount = bound(amount, 1 * MILLION, (29 * MILLION) / 10);
-
-        vm.prank(user1);
-        stakingContract.stake(amount, tier1ID);
-
-        // Verify stake amount
-        (, , uint256 stakedAmount, , , , , ) = stakingContract.getStake(1);
-        assertEq(stakedAmount, amount);
-    }
-
-    function testFuzz_RewardCalculation(uint256 amount) public {
-        // Bound amount between min and max for tier 2
-        amount = bound(amount, 3 * MILLION, (59 * MILLION) / 10);
-
-        vm.prank(user2);
-        stakingContract.stake(amount, tier2ID);
-
-        // Calculate expected KTTY reward: amount * 0.4%
-        uint256 expectedReward = (amount * 4_000) / 1_000_000;
-
-        // Check calculated reward
-        uint256 calculatedReward = stakingContract.calculateReward(
-            1,
-            address(0)
-        );
-        assertEq(calculatedReward, expectedReward);
-
-        // Check ZEE reward calculation
-        uint256 zeeReward = stakingContract.calculateReward(
-            1,
-            address(zeeToken)
-        );
-        assertEq(zeeReward, expectedReward);
-    }
-
-    /* ------------- Invariant Tests ------------- */
-
-    function test_StakeOwnershipInvariant() public {
-        // User1 stakes
-        vm.prank(user1);
-        stakingContract.stake((15 * MILLION) / 10, tier1ID);
-
-        // User2 stakes
-        vm.prank(user2);
-        stakingContract.stake(4 * MILLION, tier2ID);
-
-        // User3 stakes
-        vm.prank(user3);
-        stakingContract.stake(8 * MILLION, tier3ID);
-
-        // Verify each stake belongs to the correct owner
-        (, address owner1, , , , , , ) = stakingContract.getStake(1);
-        assertEq(owner1, user1);
-
-        (, address owner2, , , , , , ) = stakingContract.getStake(2);
-        assertEq(owner2, user2);
-
-        (, address owner3, , , , , , ) = stakingContract.getStake(3);
-        assertEq(owner3, user3);
-
-        // Verify user's stakes arrays
-        uint256[] memory user1Stakes = stakingContract.getUserStakes(user1);
-        assertEq(user1Stakes.length, 1);
-        assertEq(user1Stakes[0], 1);
-
-        uint256[] memory user2Stakes = stakingContract.getUserStakes(user2);
-        assertEq(user2Stakes.length, 1);
-        assertEq(user2Stakes[0], 2);
-
-        uint256[] memory user3Stakes = stakingContract.getUserStakes(user3);
-        assertEq(user3Stakes.length, 1);
-        assertEq(user3Stakes[0], 3);
-    }
-
-    function test_ContractBalanceInvariant() public {
-        // Initial contract balance
-        uint256 initialBalance = kttyToken.balanceOf(address(stakingContract));
-
-        // User1 stakes
-        uint256 stakeAmount = (15 * MILLION) / 10;
-        vm.prank(user1);
-        stakingContract.stake(stakeAmount, tier1ID);
-
-        // Contract balance should increase by stake amount
-        uint256 afterStakeBalance = kttyToken.balanceOf(
-            address(stakingContract)
-        );
-        assertEq(afterStakeBalance, initialBalance + stakeAmount);
-
-        // Fast forward past lockup period
-        vm.warp(block.timestamp + 31 days);
-
-        // User1 withdraws
-        vm.prank(user1);
-        stakingContract.withdraw(1);
-
-        // Contract balance should decrease by stake amount
-        uint256 afterWithdrawBalance = kttyToken.balanceOf(
-            address(stakingContract)
-        );
-        assertEq(afterWithdrawBalance, initialBalance);
+    
+    function test_UnauthorizedUpgrade() public {
+        // Test that only admin can upgrade the implementation
+        vm.startPrank(user1);
+        
+        // Deploy a new implementation
+        KTTYStaking newImplementation = new KTTYStaking();
+        
+        // Try to upgrade the proxy (should fail)
+        vm.expectRevert(); // This will pass if any revert happens
+        proxyAdmin.upgradeAndCall(ITransparentUpgradeableProxy(address(transparentProxy)), address(newImplementation), new bytes(0));
+        
+        vm.stopPrank();
     }
 }

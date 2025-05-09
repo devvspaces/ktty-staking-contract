@@ -76,6 +76,81 @@ forge create \
   src/RoninNFT.sol:RoninNFT
 ```
 
+## Deployment steps
+
+### Setup the environment variables
+
+Copy the `.env.example` file to `.env` and fill in the required values.
+
+```shell
+cp .env.example .env
+```
+
+Source the `.env` file to load the environment variables.
+
+```shell
+source .env
+```
+
+### Deploy the contract
+
+Make sure you have the required dependencies installed.
+
+```shell
+forge install
+forge build
+```
+
+Run the deployment script.
+
+```shell
+forge script script/DeployKTTYStakingUpgradeable.s.sol --rpc-url $RPC_URL --broadcast --private-key $PRIVATE_KEY
+```
+
+Verify the contract on Roninchain.
+
+```shell
+forge verify-contract --verifier sourcify --verifier-url https://sourcify.roninchain.com/server/ --chain-id 2020 $CONTRACT_ADDRESS src/KTTYStaking.sol:KTTYStaking
+```
+
+### Create tiers
+
+Copy the commands in `init-tiers.sh` to create the tiers in the staking contract.
+
+### Create reward tokens
+
+```shell
+cast send \
+  --rpc-url "$RPC_URL" \
+  --private-key "$PRIVATE_KEY" \
+  "$STAKING_CONTRACT_ADDRESS" \
+  "registerRewardToken(address,string,uint256)" \
+  "ADDRESS_HERE" \
+  "SYMBOL_HERE"  \
+  1  \
+  --legacy
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 ```shell
 forge script script/MockToken.s.sol --rpc-url $RPC_URL --broadcast --private-key $PRIVATE_KEY
 

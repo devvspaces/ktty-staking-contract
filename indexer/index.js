@@ -337,22 +337,30 @@ async function processHandlers(fromBlock, toBlock) {
 }
 
 async function startIndexing() {
-  lastProcessedBlock = await loadLastProcessedBlock();
-  const currentBlock = await provider.getBlockNumber();
-  const batchSize = 500; // Adjust based on your RPC provider limits
-
-  for (
-    let fromBlock = Number(lastProcessedBlock);
-    fromBlock <= currentBlock;
-    fromBlock += batchSize
-  ) {
-    const toBlock = Math.min(fromBlock + batchSize - 1, currentBlock);
-    console.log(`Processing blocks ${fromBlock} to ${toBlock}`);
-    await processHandlers(fromBlock, toBlock);
+  try {
+    lastProcessedBlock = await loadLastProcessedBlock();
+    const currentBlock = await provider.getBlockNumber();
+    const batchSize = 500; // Adjust based on your RPC provider limits
+  
+    for (
+      let fromBlock = Number(lastProcessedBlock);
+      fromBlock <= currentBlock;
+      fromBlock += batchSize
+    ) {
+      const toBlock = Math.min(fromBlock + batchSize - 1, currentBlock);
+      console.log(`Processing blocks ${fromBlock} to ${toBlock}`);
+      await processHandlers(fromBlock, toBlock);
+    }
+  } catch (error) {
+    console.error("Error in startIndexing:", error);
+    console.log(
+      `Error processing blocks. Retrying in ${POLL_TIME_INTERVAL / 1000} seconds...`
+    );
+    setTimeout(startIndexing, POLL_TIME_INTERVAL);
   }
 
   console.log(
-    `Finished processing historical events up to block ${currentBlock}`
+    `Finished processing historical events`
   );
 
   // Start listening for new events
