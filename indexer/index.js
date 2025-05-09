@@ -3,6 +3,7 @@ const { ethers, formatEther } = require("ethers");
 const dotenv = require("dotenv");
 const fs = require("fs").promises;
 const path = require("path");
+const Redis = require('ioredis');
 
 dotenv.config({
   path: "../.env",
@@ -42,40 +43,45 @@ const tierRewardTokenRemovedFilter =
 // Track the last processed block to resume indexing
 let lastProcessedBlock;
 
-// Path to store the last processed block
-const BLOCK_FILE_PATH = path.join(__dirname, "last-block.json");
+
+// Create Redis client - configure as needed
+const redis = new Redis({
+  host: process.env.REDIS_HOST || 'localhost',
+  port: process.env.REDIS_PORT || 6379,
+  db: process.env.REDIS_DB || 0,
+});
+
+// Redis key for storing the last processed block
+const BLOCK_KEY = 'indexer:lastProcessedBlock';
 
 // Function to read the last processed block from file
+// Function to read the last processed block from Redis
 async function loadLastProcessedBlock() {
   try {
-    const data = await fs.readFile(BLOCK_FILE_PATH, "utf8");
-    const parsed = JSON.parse(data);
-    return parsed.lastProcessedBlock || process.env.STARTING_BLOCK || 0;
+    const value = await redis.get(BLOCK_KEY);
+    if (value) {
+      return parseInt(value, 10);
+    }
+    // If not found in Redis, return default
+    return parseInt(process.env.STARTING_BLOCK, 10) || 0;
   } catch (error) {
-    // If file doesn't exist or has invalid format, return default
-    return process.env.STARTING_BLOCK || 0;
+    console.error("Error loading last processed block from Redis:", error);
+    // If Redis fails, return default
+    return parseInt(process.env.STARTING_BLOCK, 10) || 0;
   }
 }
 
-// Function to save the last processed block atomically
+// Function to save the last processed block to Redis
 async function saveLastProcessedBlock(blockNumber) {
   try {
-    // First write to a temporary file
-    const tempPath = `${BLOCK_FILE_PATH}.tmp`;
-    await fs.writeFile(
-      tempPath,
-      JSON.stringify({ lastProcessedBlock: blockNumber }, null, 2)
-    );
-
-    // Then rename (atomic operation on most file systems)
-    await fs.rename(tempPath, BLOCK_FILE_PATH);
-
+    await redis.set(BLOCK_KEY, blockNumber);
     lastProcessedBlock = blockNumber;
     console.log(`Last processed block updated to: ${lastProcessedBlock}`);
   } catch (error) {
-    console.error("Error saving last processed block:", error);
+    console.error("Error saving last processed block to Redis:", error);
   }
 }
+
 
 async function handleTierCreated(event) {
   const { tierId, name, minStake, lockupPeriod, apy } = event.args;
