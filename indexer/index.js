@@ -3,7 +3,7 @@ const { ethers, formatEther } = require("ethers");
 const dotenv = require("dotenv");
 const fs = require("fs").promises;
 const path = require("path");
-const Redis = require('ioredis');
+const Redis = require("ioredis");
 
 dotenv.config({
   path: "../.env",
@@ -43,16 +43,15 @@ const tierRewardTokenRemovedFilter =
 // Track the last processed block to resume indexing
 let lastProcessedBlock;
 
-
 // Create Redis client - configure as needed
 const redis = new Redis({
-  host: process.env.REDIS_HOST || 'localhost',
+  host: process.env.REDIS_HOST || "localhost",
   port: process.env.REDIS_PORT || 6379,
   db: process.env.REDIS_DB || 0,
 });
 
 // Redis key for storing the last processed block
-const BLOCK_KEY = 'indexer:lastProcessedBlock';
+const BLOCK_KEY = "indexer:lastProcessedBlock";
 
 // Function to read the last processed block from file
 // Function to read the last processed block from Redis
@@ -82,7 +81,6 @@ async function saveLastProcessedBlock(blockNumber) {
     throw error;
   }
 }
-
 
 async function handleTierCreated(event) {
   const { tierId, name, minStake, lockupPeriod, apy } = event.args;
@@ -347,8 +345,8 @@ async function startIndexing() {
   try {
     lastProcessedBlock = await loadLastProcessedBlock();
     const currentBlock = await provider.getBlockNumber();
-    const batchSize = 500; // Adjust based on your RPC provider limits
-  
+    const batchSize = parseInt(process.env.INDEXER_BATCH_SIZE ?? "500"); // Adjust based on your RPC provider limits
+
     for (
       let fromBlock = Number(lastProcessedBlock);
       fromBlock <= currentBlock;
@@ -361,18 +359,42 @@ async function startIndexing() {
   } catch (error) {
     console.error("Error in startIndexing:", error);
     console.log(
-      `Error processing blocks. Retrying in ${POLL_TIME_INTERVAL / 1000} seconds...`
+      `Error processing blocks. Retrying in ${
+        POLL_TIME_INTERVAL / 1000
+      } seconds...`
     );
     setTimeout(startIndexing, POLL_TIME_INTERVAL);
   }
 
-  console.log(
-    `Finished processing historical events`
-  );
+  console.log(`Finished processing historical events`);
+
+  const usePolling = process.env.USE_POLLING === "true";
 
   // Start listening for new events
-  setTimeout(startIndexing, POLL_TIME_INTERVAL);
-  // stakingContract.on(tierCreatedFilter, handleTierCreated);
+  if (usePolling) {
+    setTimeout(startIndexing, POLL_TIME_INTERVAL);
+    console.log(
+      `Listening for new events using polling every ${POLL_TIME_INTERVAL /
+        1000} seconds...`
+    );
+  } else {
+    stakingContract.on(tierCreatedFilter, handleTierCreated);
+    stakingContract.on(tierUpdatedFilter, handleTierUpdated);
+    stakingContract.on(stakedFilter, handleStaked);
+    stakingContract.on(stakeWithdrawnFilter, handleStakeWithdrawn);
+    stakingContract.on(rewardClaimedFilter, handleRewardClaimed);
+    stakingContract.on(
+      rewardTokenRegisteredFilter,
+      handleRewardTokenRegistered
+    );
+    stakingContract.on(rewardTokenUpdatedFilter, handleRewardTokenUpdated);
+    stakingContract.on(tierRewardTokenAddedFilter, handleTierRewardTokenAdded);
+    stakingContract.on(
+      tierRewardTokenRemovedFilter,
+      handleTierRewardTokenRemoved
+    );
+    console.log("Listening for new events...");
+  }
 }
 
 // Handle errors and ensure clean shutdown
