@@ -18,7 +18,8 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 
 // Blockchain setup
 const provider = new ethers.JsonRpcProvider(process.env.RPC_URL);
-const wsProvider = new ethers.WebSocketProvider(process.env.RPC_URL.replace("http", "ws"));
+const wsProvider = new ethers.WebSocketProvider(process.env.WS_URL);
+
 const stakingAddress = process.env.STAKING_CONTRACT_ADDRESS;
 const stakingABI = require("../out/KTTYStaking.sol/KTTYStaking.json").abi;
 const stakingContract = new ethers.Contract(
