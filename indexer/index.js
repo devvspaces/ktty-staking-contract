@@ -9,7 +9,7 @@ dotenv.config({
   path: "../.env",
 });
 
-POLL_TIME_INTERVAL = 5000; // 5 seconds
+POLL_TIME_INTERVAL = 10000; // milliseconds 
 
 // Supabase setup
 const supabaseUrl = process.env.SUPABASE_URL;
@@ -18,12 +18,18 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 
 // Blockchain setup
 const provider = new ethers.JsonRpcProvider(process.env.RPC_URL);
+const wsProvider = new ethers.WebSocketProvider(process.env.RPC_URL.replace("http", "ws"));
 const stakingAddress = process.env.STAKING_CONTRACT_ADDRESS;
 const stakingABI = require("../out/KTTYStaking.sol/KTTYStaking.json").abi;
 const stakingContract = new ethers.Contract(
   stakingAddress,
   stakingABI,
   provider
+);
+const wsStakingContract = new ethers.Contract(
+  stakingAddress,
+  stakingABI,
+  wsProvider
 );
 
 // Set up event filters
@@ -378,18 +384,18 @@ async function startIndexing() {
         1000} seconds...`
     );
   } else {
-    stakingContract.on(tierCreatedFilter, handleTierCreated);
-    stakingContract.on(tierUpdatedFilter, handleTierUpdated);
-    stakingContract.on(stakedFilter, handleStaked);
-    stakingContract.on(stakeWithdrawnFilter, handleStakeWithdrawn);
-    stakingContract.on(rewardClaimedFilter, handleRewardClaimed);
-    stakingContract.on(
+    wsStakingContract.on(tierCreatedFilter, handleTierCreated);
+    wsStakingContract.on(tierUpdatedFilter, handleTierUpdated);
+    wsStakingContract.on(stakedFilter, handleStaked);
+    wsStakingContract.on(stakeWithdrawnFilter, handleStakeWithdrawn);
+    wsStakingContract.on(rewardClaimedFilter, handleRewardClaimed);
+    wsStakingContract.on(
       rewardTokenRegisteredFilter,
       handleRewardTokenRegistered
     );
-    stakingContract.on(rewardTokenUpdatedFilter, handleRewardTokenUpdated);
-    stakingContract.on(tierRewardTokenAddedFilter, handleTierRewardTokenAdded);
-    stakingContract.on(
+    wsStakingContract.on(rewardTokenUpdatedFilter, handleRewardTokenUpdated);
+    wsStakingContract.on(tierRewardTokenAddedFilter, handleTierRewardTokenAdded);
+    wsStakingContract.on(
       tierRewardTokenRemovedFilter,
       handleTierRewardTokenRemoved
     );
