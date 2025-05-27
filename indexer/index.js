@@ -9,7 +9,7 @@ dotenv.config({
   path: "../.env",
 });
 
-POLL_TIME_INTERVAL = 10000; // milliseconds 
+POLL_TIME_INTERVAL = 300000; // milliseconds 
 
 // Supabase setup
 const supabaseUrl = process.env.SUPABASE_URL;
