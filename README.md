@@ -107,6 +107,12 @@ Run the deployment script.
 forge script script/DeployKTTYStakingUpgradeable.s.sol --rpc-url $RPC_URL --broadcast --private-key $PRIVATE_KEY
 ```
 
+Run the upgrade script.
+
+```shell
+forge script script/UpgradeKTTTYStaking.s.sol --rpc-url $RPC_URL --broadcast --private-key $PRIVATE_KEY
+```
+
 Verify the contract on Roninchain.
 
 ```shell

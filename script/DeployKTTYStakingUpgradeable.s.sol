@@ -34,6 +34,7 @@ contract DeployKTTYStakingUpgradeable is Script {
             address(proxyAdmin),
             initData
         );
+        // proxy.grantRole(proxy.UPGRADER_ROLE(), proxyAdminAddress);
         
         // Log the addresses
         console.log("KTTYStaking Implementation deployed at: %s", address(implementation));

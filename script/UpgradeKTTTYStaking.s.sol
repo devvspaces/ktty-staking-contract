@@ -21,6 +21,9 @@ contract UpgradeKTTYStaking is Script {
         
         // Get ProxyAdmin instance
         KTTYStakingProxyAdmin proxyAdmin = KTTYStakingProxyAdmin(proxyAdminAddress);
+
+        KTTYStaking proxy = KTTYStaking(proxyAddress);
+        proxy.grantRole(proxy.UPGRADER_ROLE(), proxyAdminAddress);
         
         // Upgrade the proxy to the new implementation
         proxyAdmin.upgradeAndCall(

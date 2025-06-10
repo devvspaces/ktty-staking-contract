@@ -539,7 +539,7 @@ contract KTTYStaking is
         kttyToken.safeTransfer(msg.sender, userStake.amount);
 
         // Calculate and transfer KTTY rewards
-        uint256 kttyRewardAmount = (userStake.amount * tier.apy) / 1e6;
+        uint256 kttyRewardAmount = ((userStake.amount * tier.apy) / 1e6) / 100;
         if (kttyRewardAmount > 0) {
             kttyToken.safeTransfer(msg.sender, kttyRewardAmount);
             emit RewardClaimed(
@@ -554,7 +554,7 @@ contract KTTYStaking is
         for (uint256 i = 0; i < tier.rewardTokens.length; i++) {
             address tokenAddress = tier.rewardTokens[i];
             if (rewardTokens[tokenAddress].isActive) {
-                uint256 tokenRewardAmount = (userStake.amount * tier.apy) / 1e6;
+                uint256 tokenRewardAmount = ((userStake.amount * tier.apy) / 1e6) / 100;
                 if (tokenRewardAmount > 0) {
                     IERC20(tokenAddress).safeTransfer(
                         msg.sender,
@@ -612,7 +612,7 @@ contract KTTYStaking is
         // For KTTY token or any other token, it's a fixed percentage of the staked amount
         if (rewardToken == address(kttyToken)) {
             // Calculate fixed KTTY rewards
-            return (userStake.amount * tier.apy) / 1e6;
+            return ((userStake.amount * tier.apy) / 1e6) / 100;
         } else {
             // Validate additional reward token
             if (rewardTokens[rewardToken].tokenAddress == address(0)) return 0;
@@ -629,7 +629,7 @@ contract KTTYStaking is
             if (!isInTier) return 0;
 
             // Calculate fixed percentage reward
-            return (userStake.amount * tier.apy) / 1e6;
+            return ((userStake.amount * tier.apy) / 1e6) / 100;
         }
     }
 

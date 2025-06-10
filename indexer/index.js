@@ -282,7 +282,7 @@ async function handleRewardClaimed(event) {
     stake_id: stakeId.toString(),
     owner,
     token_address: token,
-    amount: amount.toString(),
+    amount: formatEther(amount)
     block_timestamp: event.blockNumber,
     transaction_hash: event.transactionHash,
   });

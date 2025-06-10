@@ -6,6 +6,7 @@ import {KTTYStaking} from "../src/KTTYStaking.sol";
 import {KTTYStakingProxyAdmin} from "../src/KTTYStakingProxyAdmin.sol";
 import {TransparentUpgradeableProxy, ITransparentUpgradeableProxy} from "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {MockERC20} from "../src/MockERC.sol";
 
 contract KTTYStakingUpgradeableTest is Test {
@@ -61,17 +62,26 @@ contract KTTYStakingUpgradeableTest is Test {
             initData
         );
         
+        // Deploy UUPS proxy
+        // ERC1967Proxy uupsProxy = new ERC1967Proxy(
+        //     address(implementation),
+        //     initData
+        // );
+        
         // Create a proxy instance for easy interaction
         proxy = KTTYStaking(address(transparentProxy));
+        // proxy = KTTYStaking(address(uupsProxy));
         
         // Setup roles
         proxy.grantRole(proxy.EMERGENCY_ROLE(), emergencyAdmin);
         proxy.grantRole(proxy.TIER_MANAGER_ROLE(), tierManager);
         proxy.grantRole(proxy.FUND_MANAGER_ROLE(), fundManager);
+        proxy.grantRole(proxy.UPGRADER_ROLE(), address(proxyAdmin));
         
         // Transfer some reward tokens to the contract
         rewardToken1.transfer(address(proxy), 10_000 * 1e18);
         rewardToken2.transfer(address(proxy), 10_000 * 1e18);
+        kttyToken.transfer(address(proxy), 10_000 * 1e18);
         
         vm.stopPrank();
     }
@@ -188,7 +198,7 @@ contract KTTYStakingUpgradeableTest is Test {
         vm.startPrank(tierManager);
         
         // Add a tier
-        proxy.addTier("Bronze", 100 * 1e18, 1000 * 1e18, 30, 50000); // 5% APY
+        proxy.addTier("Bronze", 100 * 1e18, 1000 * 1e18, 30, 50000); // 0.5% APY
         
         vm.stopPrank();
         
@@ -197,6 +207,8 @@ contract KTTYStakingUpgradeableTest is Test {
         // Approve tokens for staking
         uint256 stakeAmount = 200 * 1e18;
         kttyToken.approve(address(proxy), stakeAmount);
+
+        uint256 oldBalance = kttyToken.balanceOf(user1);
         
         // Stake tokens
         proxy.stake(stakeAmount, 1);
@@ -227,6 +239,9 @@ contract KTTYStakingUpgradeableTest is Test {
         // Check that stake is marked as withdrawn
         (, , , , , , hasWithdrawn, ) = proxy.getStake(1);
         assertTrue(hasWithdrawn);
+
+        uint256 newBalance = kttyToken.balanceOf(user1);
+        assertEq(newBalance, oldBalance);
         
         vm.stopPrank();
     }
@@ -266,15 +281,16 @@ contract KTTYStakingUpgradeableTest is Test {
         vm.warp(block.timestamp + 31 days);
         
         // Check reward calculation
-        uint256 expectedKttyReward = (stakeAmount * 50000) / 1e6; // 5% APY
+        uint256 expectedKttyReward = ((stakeAmount * 50000) / 1e6) / 100; // 5% APY
         assertEq(proxy.calculateReward(1, address(0)), expectedKttyReward);
         
-        uint256 expectedRwd1Reward = (stakeAmount * 50000) / 1e6; // Same formula as in the contract
+        uint256 expectedRwd1Reward = ((stakeAmount * 50000) / 1e6) / 100; // Same formula as in the contract
         assertEq(proxy.calculateReward(1, address(rewardToken1)), expectedRwd1Reward);
         
         // Get balance before claiming
         uint256 kttyBalanceBefore = kttyToken.balanceOf(user1);
         uint256 rwd1BalanceBefore = rewardToken1.balanceOf(user1);
+        uint256 proxyRwd1BalanceBefore = rewardToken1.balanceOf(address(proxy));
         
         // Claim rewards and withdraw
         proxy.claimRewardsAndWithdraw(1);
@@ -389,4 +405,37 @@ contract KTTYStakingUpgradeableTest is Test {
         
         vm.stopPrank();
     }
+    
+    // function test_UpgradeContract() public {
+    //     vm.startPrank(admin);
+        
+    //     // Deploy a new implementation
+    //     KTTYStaking newImplementation = new KTTYStaking();
+        
+    //     // Upgrade using UUPS pattern (admin has UPGRADER_ROLE)
+    //     proxy.upgradeToAndCall(address(newImplementation), new bytes(0));
+        
+    //     // Verify the contract still works after upgrade by creating a tier
+    //     proxy.addTier("Bronze", 100 * 1e18, 1000 * 1e18, 30, 50000);
+        
+    //     // Check tier was created successfully
+    //     (uint256 id, string memory name, , , , , ) = proxy.tiers(1);
+    //     assertEq(id, 1);
+    //     assertEq(name, "Bronze");
+        
+    //     vm.stopPrank();
+    // }
+    
+    // function test_UnauthorizedUpgrade() public {
+    //     vm.startPrank(user1);
+        
+    //     // Deploy a new implementation
+    //     KTTYStaking newImplementation = new KTTYStaking();
+        
+    //     // Try to upgrade without UPGRADER_ROLE (should fail)
+    //     vm.expectRevert();
+    //     proxy.upgradeToAndCall(address(newImplementation), new bytes(0));
+        
+    //     vm.stopPrank();
+    // }
 }
