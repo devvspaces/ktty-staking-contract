@@ -253,6 +253,20 @@ cast send \
   250000 \
   true \
   --legacy
+  
+cast send \
+  --rpc-url $RPC_URL \
+  --private-key $PRIVATE_KEY \
+  $STAKING_CONTRACT_ADDRESS \
+  "updateTier(uint256,string,uint256,uint256,uint256,uint256,bool)" \
+  1 \
+  "Entry" \
+  $(cast --to-wei "1000000")  \
+  $(cast --to-wei "2900000")  \
+  180 \
+  20000 \
+  true \
+  --legacy
 
 
 # Mint tokens
@@ -293,6 +307,14 @@ cast send \
   --private-key $PRIVATE_KEY \
   $STAKING_CONTRACT_ADDRESS \
   "pause()" \
+  --legacy
+
+cast send \
+  --rpc-url $RPC_URL \
+  --private-key $PRIVATE_KEY \
+  $STAKING_CONTRACT_ADDRESS \
+  "claimRewardsAndWithdraw(uint256)" \
+  1 \
   --legacy
   
 ```

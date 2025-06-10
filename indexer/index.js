@@ -9,7 +9,7 @@ dotenv.config({
   path: "../.env",
 });
 
-POLL_TIME_INTERVAL = 300000; // milliseconds 
+POLL_TIME_INTERVAL = 300000; // milliseconds
 
 // Supabase setup
 const supabaseUrl = process.env.SUPABASE_URL;
@@ -18,7 +18,9 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 
 // Blockchain setup
 const provider = new ethers.JsonRpcProvider(process.env.RPC_URL);
-const wsProvider = new ethers.WebSocketProvider(process.env.WS_URL);
+const wsProvider = process.env.WS_URL
+  ? new ethers.WebSocketProvider(process.env.WS_URL)
+  : null;
 
 const stakingAddress = process.env.STAKING_CONTRACT_ADDRESS;
 const stakingABI = require("../out/KTTYStaking.sol/KTTYStaking.json").abi;
@@ -27,11 +29,9 @@ const stakingContract = new ethers.Contract(
   stakingABI,
   provider
 );
-const wsStakingContract = new ethers.Contract(
-  stakingAddress,
-  stakingABI,
-  wsProvider
-);
+const wsStakingContract = wsProvider
+  ? new ethers.Contract(stakingAddress, stakingABI, wsProvider)
+  : null;
 
 // Set up event filters
 const tierCreatedFilter = stakingContract.filters.TierCreated();
@@ -282,7 +282,7 @@ async function handleRewardClaimed(event) {
     stake_id: stakeId.toString(),
     owner,
     token_address: token,
-    amount: formatEther(amount)
+    amount: formatEther(amount),
     block_timestamp: event.blockNumber,
     transaction_hash: event.transactionHash,
   });
@@ -352,7 +352,11 @@ async function startIndexing() {
   try {
     lastProcessedBlock = await loadLastProcessedBlock();
     const currentBlock = await provider.getBlockNumber();
-    const batchSize = parseInt(process.env.INDEXER_BATCH_SIZE ?? "500"); // Adjust based on your RPC provider limits
+    const batchSize = parseInt(process.env.INDEXER_BATCH_SIZE ?? "500");
+
+    console.log(
+      `Starting indexing from block ${lastProcessedBlock} to ${currentBlock} with batch size ${batchSize}`
+    );
 
     for (
       let fromBlock = Number(lastProcessedBlock);
@@ -381,10 +385,12 @@ async function startIndexing() {
   if (usePolling) {
     setTimeout(startIndexing, POLL_TIME_INTERVAL);
     console.log(
-      `Listening for new events using polling every ${POLL_TIME_INTERVAL /
-        1000} seconds...`
+      `Listening for new events using polling every ${
+        POLL_TIME_INTERVAL / 1000
+      } seconds...`
     );
-  } else {
+  } else if (wsStakingContract) {
+    console.log("Listening for new events using WebSocket...");
     wsStakingContract.on(tierCreatedFilter, handleTierCreated);
     wsStakingContract.on(tierUpdatedFilter, handleTierUpdated);
     wsStakingContract.on(stakedFilter, handleStaked);
@@ -395,7 +401,10 @@ async function startIndexing() {
       handleRewardTokenRegistered
     );
     wsStakingContract.on(rewardTokenUpdatedFilter, handleRewardTokenUpdated);
-    wsStakingContract.on(tierRewardTokenAddedFilter, handleTierRewardTokenAdded);
+    wsStakingContract.on(
+      tierRewardTokenAddedFilter,
+      handleTierRewardTokenAdded
+    );
     wsStakingContract.on(
       tierRewardTokenRemovedFilter,
       handleTierRewardTokenRemoved
