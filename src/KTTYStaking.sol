@@ -147,6 +147,11 @@ contract KTTYStaking is
         uint256 rewardRate,
         bool isActive
     );
+    event RewardTokenCompletelyRemoved(
+        address indexed tokenAddress,
+        address indexed recipient,
+        uint256 amount
+    );
 
     event Staked(
         uint256 indexed stakeId,
@@ -435,6 +440,58 @@ contract KTTYStaking is
     }
 
     /**
+     * @dev Remove a reward token completely from all tiers and transfer its balance
+     * @param tokenAddress Address of the token to remove completely
+     * @param recipient Address to receive the token balance
+     */
+    function removeRewardToken(
+        address tokenAddress,
+        address recipient
+    ) external onlyRole(FUND_MANAGER_ROLE) {
+        if (tokenAddress == address(0)) revert InvalidAmount();
+        if (recipient == address(0)) revert InvalidAmount();
+        if (rewardTokens[tokenAddress].tokenAddress == address(0))
+            revert TokenNotRegistered();
+
+        // Remove token from all tiers
+        for (uint256 i = 0; i < tierIds.length; i++) {
+            uint256 tierId = tierIds[i];
+            Tier storage tier = tiers[tierId];
+            
+            // Check if token exists in this tier and remove it
+            for (uint256 j = 0; j < tier.rewardTokens.length; j++) {
+                if (tier.rewardTokens[j] == tokenAddress) {
+                    // Remove token by swapping with the last element
+                    if (j != tier.rewardTokens.length - 1) {
+                        tier.rewardTokens[j] = tier.rewardTokens[
+                            tier.rewardTokens.length - 1
+                        ];
+                    }
+                    tier.rewardTokens.pop();
+                    
+                    emit TierRewardTokenRemoved(tierId, tokenAddress);
+                    break; // Token found and removed, move to next tier
+                }
+            }
+        }
+
+        // Deactivate the reward token
+        rewardTokens[tokenAddress].isActive = false;
+        
+        // Get the contract's balance of this token
+        IERC20 token = IERC20(tokenAddress);
+        uint256 balance = token.balanceOf(address(this));
+        
+        // Transfer the entire balance to recipient if balance > 0
+        if (balance > 0) {
+            token.safeTransfer(recipient, balance);
+        }
+
+        emit RewardTokenUpdated(tokenAddress, rewardTokens[tokenAddress].rewardRate, false);
+        emit RewardTokenCompletelyRemoved(tokenAddress, recipient, balance);
+    }
+
+    /**
      * @dev Create a new stake
      * @param amount Amount of KTTY to stake
      * @param tierId Tier ID
@@ -694,6 +751,28 @@ contract KTTYStaking is
         address owner
     ) external view returns (uint256[] memory) {
         return _ownerStakes[owner];
+    }
+
+    /**
+     * @dev Get all registered reward tokens with their symbols
+     * @return addresses Array of token addresses
+     * @return symbols Array of token symbols
+     */
+    function getAllRewardTokens() external view returns (
+        address[] memory addresses,
+        string[] memory symbols
+    ) {
+        uint256 length = rewardTokenAddresses.length;
+        addresses = new address[](length);
+        symbols = new string[](length);
+        
+        for (uint256 i = 0; i < length; i++) {
+            address tokenAddress = rewardTokenAddresses[i];
+            addresses[i] = tokenAddress;
+            symbols[i] = rewardTokens[tokenAddress].symbol;
+        }
+        
+        return (addresses, symbols);
     }
 
     /**

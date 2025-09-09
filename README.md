@@ -137,6 +137,27 @@ cast send \
   --legacy
 ```
 
+```shell
+cast call \
+  --rpc-url $RPC_URL \
+  --private-key $PRIVATE_KEY \
+  $STAKING_CONTRACT_ADDRESS \
+  "getAllRewardTokens()(address[],string[])"
+```
+
+```shell
+cast call $STAKING_CONTRACT_ADDRESS "removeRewardToken(address,address)" "0xd7dABE4D60Ba712F3A582DF3bBda9fD55231CA13" "0x981AA7621fB24Ab87c62392cd0f28172F1d375d7" --rpc-url $RPC_URL --private-key $PRIVATE_KEY
+
+
+cast call $STAKING_CONTRACT_ADDRESS "removeRewardToken(address,address)" "0x06f7481D937Eb637d7d9DEeDf175957d5D881397" "0x981AA7621fB24Ab87c62392cd0f28172F1d375d7" --rpc-url $RPC_URL --private-key $PRIVATE_KEY
+
+
+cast send $STAKING_CONTRACT_ADDRESS "removeRewardToken(address,address)" "0xaF997B85aC9D51969E8eB9FC5B7CDB3Fe188771b" "0x981AA7621fB24Ab87c62392cd0f28172F1d375d7" --rpc-url $RPC_URL --private-key $PRIVATE_KEY
+
+
+cast send $STAKING_CONTRACT_ADDRESS "removeRewardToken(address,address)" "0x2D88f4B225cdf51D1f0582311C16E68a2144421a" "0x981AA7621fB24Ab87c62392cd0f28172F1d375d7" --rpc-url $RPC_URL --private-key $PRIVATE_KEY
+```
+
 
 
 

@@ -438,4 +438,336 @@ contract KTTYStakingUpgradeableTest is Test {
         
     //     vm.stopPrank();
     // }
+    
+    function test_RemoveRewardToken() public {
+        vm.startPrank(tierManager);
+        
+        // Add multiple tiers
+        proxy.addTier("Bronze", 100 * 1e18, 1000 * 1e18, 30, 50000);
+        proxy.addTier("Silver", 1000 * 1e18, 5000 * 1e18, 60, 80000);
+        
+        vm.stopPrank();
+        
+        vm.startPrank(fundManager);
+        
+        // Register reward token
+        proxy.registerRewardToken(address(rewardToken1), "RWD1", 500000);
+        
+        vm.stopPrank();
+        
+        vm.startPrank(tierManager);
+        
+        // Add reward token to both tiers
+        proxy.addRewardTokenToTier(1, address(rewardToken1));
+        proxy.addRewardTokenToTier(2, address(rewardToken1));
+        
+        // Verify token is in both tiers
+        address[] memory tier1Tokens = proxy.getTierRewardTokens(1);
+        address[] memory tier2Tokens = proxy.getTierRewardTokens(2);
+        assertEq(tier1Tokens.length, 1);
+        assertEq(tier2Tokens.length, 1);
+        assertEq(tier1Tokens[0], address(rewardToken1));
+        assertEq(tier2Tokens[0], address(rewardToken1));
+        
+        vm.stopPrank();
+        
+        vm.startPrank(fundManager);
+        
+        // Get initial balances
+        uint256 contractBalanceBefore = rewardToken1.balanceOf(address(proxy));
+        uint256 recipientBalanceBefore = rewardToken1.balanceOf(user2);
+        
+        // Verify token is active before removal
+        (, , , bool isActiveBefore) = proxy.rewardTokens(address(rewardToken1));
+        assertTrue(isActiveBefore);
+        
+        // Remove reward token completely
+        vm.expectEmit(true, true, false, true);
+        emit KTTYStaking.TierRewardTokenRemoved(1, address(rewardToken1));
+        vm.expectEmit(true, true, false, true);
+        emit KTTYStaking.TierRewardTokenRemoved(2, address(rewardToken1));
+        vm.expectEmit(true, true, false, true);
+        emit KTTYStaking.RewardTokenCompletelyRemoved(address(rewardToken1), user2, contractBalanceBefore);
+        
+        proxy.removeRewardToken(address(rewardToken1), user2);
+        
+        // Verify token removed from both tiers
+        tier1Tokens = proxy.getTierRewardTokens(1);
+        tier2Tokens = proxy.getTierRewardTokens(2);
+        assertEq(tier1Tokens.length, 0);
+        assertEq(tier2Tokens.length, 0);
+        
+        // Verify token is deactivated
+        (, , , bool isActiveAfter) = proxy.rewardTokens(address(rewardToken1));
+        assertFalse(isActiveAfter);
+        
+        // Verify balance was transferred
+        uint256 contractBalanceAfter = rewardToken1.balanceOf(address(proxy));
+        uint256 recipientBalanceAfter = rewardToken1.balanceOf(user2);
+        assertEq(contractBalanceAfter, 0);
+        assertEq(recipientBalanceAfter, recipientBalanceBefore + contractBalanceBefore);
+        
+        vm.stopPrank();
+    }
+    
+    function test_RemoveRewardTokenMultipleTiers() public {
+        vm.startPrank(tierManager);
+        
+        // Add 3 tiers
+        proxy.addTier("Bronze", 100 * 1e18, 1000 * 1e18, 30, 50000);
+        proxy.addTier("Silver", 1000 * 1e18, 5000 * 1e18, 60, 80000);
+        proxy.addTier("Gold", 5000 * 1e18, 0, 90, 120000);
+        
+        vm.stopPrank();
+        
+        vm.startPrank(fundManager);
+        
+        // Register reward token
+        proxy.registerRewardToken(address(rewardToken1), "RWD1", 500000);
+        
+        vm.stopPrank();
+        
+        vm.startPrank(tierManager);
+        
+        // Add reward token to all 3 tiers
+        proxy.addRewardTokenToTier(1, address(rewardToken1));
+        proxy.addRewardTokenToTier(2, address(rewardToken1));
+        proxy.addRewardTokenToTier(3, address(rewardToken1));
+        
+        vm.stopPrank();
+        
+        vm.startPrank(fundManager);
+        
+        // Remove reward token and expect 3 tier removal events
+        vm.expectEmit(true, true, false, true);
+        emit KTTYStaking.TierRewardTokenRemoved(1, address(rewardToken1));
+        vm.expectEmit(true, true, false, true);
+        emit KTTYStaking.TierRewardTokenRemoved(2, address(rewardToken1));
+        vm.expectEmit(true, true, false, true);
+        emit KTTYStaking.TierRewardTokenRemoved(3, address(rewardToken1));
+        
+        proxy.removeRewardToken(address(rewardToken1), user2);
+        
+        // Verify token removed from all tiers
+        assertEq(proxy.getTierRewardTokens(1).length, 0);
+        assertEq(proxy.getTierRewardTokens(2).length, 0);
+        assertEq(proxy.getTierRewardTokens(3).length, 0);
+        
+        vm.stopPrank();
+    }
+    
+    function test_RemoveRewardTokenBalanceTransfer() public {
+        vm.startPrank(fundManager);
+        
+        // Register reward token
+        proxy.registerRewardToken(address(rewardToken1), "RWD1", 500000);
+        
+        // Get exact contract balance
+        uint256 exactBalance = rewardToken1.balanceOf(address(proxy));
+        uint256 recipientBalanceBefore = rewardToken1.balanceOf(user2);
+        
+        // Remove reward token
+        proxy.removeRewardToken(address(rewardToken1), user2);
+        
+        // Verify exact balance was transferred
+        assertEq(rewardToken1.balanceOf(address(proxy)), 0);
+        assertEq(rewardToken1.balanceOf(user2), recipientBalanceBefore + exactBalance);
+        
+        vm.stopPrank();
+    }
+    
+    function test_RemoveRewardTokenPartialTiers() public {
+        vm.startPrank(tierManager);
+        
+        // Add 3 tiers
+        proxy.addTier("Bronze", 100 * 1e18, 1000 * 1e18, 30, 50000);
+        proxy.addTier("Silver", 1000 * 1e18, 5000 * 1e18, 60, 80000);
+        proxy.addTier("Gold", 5000 * 1e18, 0, 90, 120000);
+        
+        vm.stopPrank();
+        
+        vm.startPrank(fundManager);
+        
+        // Register reward tokens
+        proxy.registerRewardToken(address(rewardToken1), "RWD1", 500000);
+        proxy.registerRewardToken(address(rewardToken2), "RWD2", 250000);
+        
+        vm.stopPrank();
+        
+        vm.startPrank(tierManager);
+        
+        // Add rewardToken1 to only 2 tiers, rewardToken2 to all tiers
+        proxy.addRewardTokenToTier(1, address(rewardToken1));
+        proxy.addRewardTokenToTier(2, address(rewardToken1));
+        proxy.addRewardTokenToTier(1, address(rewardToken2));
+        proxy.addRewardTokenToTier(2, address(rewardToken2));
+        proxy.addRewardTokenToTier(3, address(rewardToken2));
+        
+        vm.stopPrank();
+        
+        vm.startPrank(fundManager);
+        
+        // Remove rewardToken1 - should only affect tiers 1 and 2
+        vm.expectEmit(true, true, false, true);
+        emit KTTYStaking.TierRewardTokenRemoved(1, address(rewardToken1));
+        vm.expectEmit(true, true, false, true);
+        emit KTTYStaking.TierRewardTokenRemoved(2, address(rewardToken1));
+        // No event for tier 3 since token wasn't there
+        
+        proxy.removeRewardToken(address(rewardToken1), user2);
+        
+        // Verify rewardToken1 removed from tiers 1&2, rewardToken2 still in all tiers
+        assertEq(proxy.getTierRewardTokens(1).length, 1); // Only rewardToken2
+        assertEq(proxy.getTierRewardTokens(2).length, 1); // Only rewardToken2
+        assertEq(proxy.getTierRewardTokens(3).length, 1); // Only rewardToken2
+        assertEq(proxy.getTierRewardTokens(1)[0], address(rewardToken2));
+        assertEq(proxy.getTierRewardTokens(2)[0], address(rewardToken2));
+        assertEq(proxy.getTierRewardTokens(3)[0], address(rewardToken2));
+        
+        vm.stopPrank();
+    }
+    
+    function test_RemoveRewardTokenNotInAnyTier() public {
+        vm.startPrank(fundManager);
+        
+        // Register reward token but don't add to any tier
+        proxy.registerRewardToken(address(rewardToken1), "RWD1", 500000);
+        
+        uint256 contractBalance = rewardToken1.balanceOf(address(proxy));
+        uint256 recipientBalanceBefore = rewardToken1.balanceOf(user2);
+        
+        // Remove reward token - should only deactivate and transfer balance
+        vm.expectEmit(true, true, false, true);
+        emit KTTYStaking.RewardTokenCompletelyRemoved(address(rewardToken1), user2, contractBalance);
+        // No TierRewardTokenRemoved events should be emitted
+        
+        proxy.removeRewardToken(address(rewardToken1), user2);
+        
+        // Verify token is deactivated
+        (, , , bool isActive) = proxy.rewardTokens(address(rewardToken1));
+        assertFalse(isActive);
+        
+        // Verify balance was transferred
+        assertEq(rewardToken1.balanceOf(address(proxy)), 0);
+        assertEq(rewardToken1.balanceOf(user2), recipientBalanceBefore + contractBalance);
+        
+        vm.stopPrank();
+    }
+    
+    function test_RemoveRewardTokenUnauthorized() public {
+        vm.startPrank(fundManager);
+        
+        // Register reward token
+        proxy.registerRewardToken(address(rewardToken1), "RWD1", 500000);
+        
+        vm.stopPrank();
+        
+        vm.startPrank(user1); // Not a fund manager
+        
+        // Try to remove reward token (should fail)
+        vm.expectRevert();
+        proxy.removeRewardToken(address(rewardToken1), user2);
+        
+        vm.stopPrank();
+    }
+    
+    function test_RemoveRewardTokenZeroTokenAddress() public {
+        vm.startPrank(fundManager);
+        
+        // Try to remove with zero token address (should fail)
+        vm.expectRevert();
+        proxy.removeRewardToken(address(0), user2);
+        
+        vm.stopPrank();
+    }
+    
+    function test_RemoveRewardTokenZeroRecipientAddress() public {
+        vm.startPrank(fundManager);
+        
+        // Register reward token
+        proxy.registerRewardToken(address(rewardToken1), "RWD1", 500000);
+        
+        // Try to remove with zero recipient address (should fail)
+        vm.expectRevert();
+        proxy.removeRewardToken(address(rewardToken1), address(0));
+        
+        vm.stopPrank();
+    }
+    
+    function test_RemoveRewardTokenNotRegistered() public {
+        vm.startPrank(fundManager);
+        
+        // Try to remove unregistered token (should fail)
+        vm.expectRevert();
+        proxy.removeRewardToken(address(rewardToken1), user2);
+        
+        vm.stopPrank();
+    }
+    
+    function test_GetAllRewardTokens() public {
+        vm.startPrank(fundManager);
+        
+        // Initially should return empty arrays
+        (address[] memory addresses, string[] memory symbols) = proxy.getAllRewardTokens();
+        assertEq(addresses.length, 0);
+        assertEq(symbols.length, 0);
+        
+        // Register reward tokens
+        proxy.registerRewardToken(address(rewardToken1), "RWD1", 500000);
+        proxy.registerRewardToken(address(rewardToken2), "RWD2", 250000);
+        
+        // Get all reward tokens
+        (addresses, symbols) = proxy.getAllRewardTokens();
+        
+        // Verify arrays have correct length
+        assertEq(addresses.length, 2);
+        assertEq(symbols.length, 2);
+        
+        // Verify first token
+        assertEq(addresses[0], address(rewardToken1));
+        assertEq(symbols[0], "RWD1");
+        
+        // Verify second token
+        assertEq(addresses[1], address(rewardToken2));
+        assertEq(symbols[1], "RWD2");
+        
+        vm.stopPrank();
+    }
+    
+    function test_GetAllRewardTokensAfterRemoval() public {
+        vm.startPrank(fundManager);
+        
+        // Register multiple reward tokens
+        proxy.registerRewardToken(address(rewardToken1), "RWD1", 500000);
+        proxy.registerRewardToken(address(rewardToken2), "RWD2", 250000);
+        
+        // Verify both tokens are returned
+        (address[] memory addresses, string[] memory symbols) = proxy.getAllRewardTokens();
+        assertEq(addresses.length, 2);
+        assertEq(symbols.length, 2);
+        
+        // Remove one token (should still be in the list but deactivated)
+        proxy.removeRewardToken(address(rewardToken1), user2);
+        
+        // Get all reward tokens again - should still show both (removal doesn't delete from rewardTokenAddresses)
+        (addresses, symbols) = proxy.getAllRewardTokens();
+        assertEq(addresses.length, 2);
+        assertEq(symbols.length, 2);
+        
+        // Verify the symbols are still correct
+        bool foundRwd1 = false;
+        bool foundRwd2 = false;
+        for (uint256 i = 0; i < addresses.length; i++) {
+            if (addresses[i] == address(rewardToken1) && keccak256(bytes(symbols[i])) == keccak256(bytes("RWD1"))) {
+                foundRwd1 = true;
+            }
+            if (addresses[i] == address(rewardToken2) && keccak256(bytes(symbols[i])) == keccak256(bytes("RWD2"))) {
+                foundRwd2 = true;
+            }
+        }
+        assertTrue(foundRwd1);
+        assertTrue(foundRwd2);
+        
+        vm.stopPrank();
+    }
 }
